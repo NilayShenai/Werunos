@@ -1,15 +1,3 @@
-#### vfs/inodes.go — inode structure
-#### vfs/extents.go — extent tree
-#### vfs/reader.go — ReadFileAt
-#### vfs/writer.go — WriteFileAt
-#### vfs/allocate.go — block and inode allocation
-#### vfs/reclaim.go — freeing and truncation
-#### vfs/jbd2.go — journal replay
-#### vfs/dirent.go — directory entry manipulation
-#### vfs/directory.go — directory reading
-#### vfs/symlinks.go — symlink reading
-#### vfs/redolog.go — crash-safe writes
-#### vfs/health.go — filesystem checker
 # werunos
 
 werunos is a userspace ext4 driver for Windows that mounts ext4 partitions
@@ -24,6 +12,23 @@ on-disk structures, replays the jbd2 journal when needed, and exposes a
 POSIX-like interface through WinFsp. The implementation emphasizes data
 integrity and crash safety for writes to raw disks and disk images.
 
+## Contents
+
+- [Overview](#overview)
+- [Key capabilities](#key-capabilities)
+- [Features](#features)
+- [Status](#status)
+- [Quick start](#quick-start)
+- [Project layout](#project-layout)
+- [Contributing](#contributing)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Building](#building)
+- [Performance](#performance)
+- [Limitations](#limitations)
+- [FAQ](#faq)
+- [License](#license)
+
 ## Key capabilities
 
 - Replays the jbd2 journal to recover from unclean shutdowns.
@@ -32,6 +37,62 @@ integrity and crash safety for writes to raw disks and disk images.
 - Full POSIX semantics: hard links, symlinks, chmod, chown, and renames.
 - Raw device support with sector-aligned I/O and partition parsing.
 - Minimal external dependencies: WinFsp is required for FUSE support.
+
+## Features
+
+### Core filesystem
+
+| Operation | Support | Implementation |
+|---|---|---|
+| Read files | Yes | `reader.go`: extent walk, on-demand block reads |
+| Write files | Yes | `writer.go`: block alloc, extent append, read-modify-write |
+| Create files | Yes | `allocate.go`: inode alloc + init, `dirent.go`: add entry |
+| Delete files | Yes | `dirent.go`: remove entry, `reclaim.go`: free blocks + inode |
+| Truncate (grow) | Yes | `writer.go`: write zero-filled blocks |
+| Truncate (shrink) | Yes | `reclaim.go`: split/cull extents, free blocks |
+| Directories | Yes | Read, create (with `.`/`..`), delete (if empty), rename |
+| Rename | Yes | Remove + add entries; handles existing target |
+| Symlinks | Yes | Fast (in `I_block`) and slow (data block via extent tree) |
+| Hard links | Yes | Link count tracked; directory linking blocked |
+| chmod | Yes | `I_mode` permission bits updated, inode persisted |
+| chown | Yes | `I_uid`/`I_gid` updated (full 32-bit via `L_i_uid_high`/`L_i_gid_high`) |
+
+### Crash safety
+
+| Protection | Implementation |
+|---|---|
+| Redo log | `redolog.go`: pre-read + log + fsync + write + truncate |
+| jbd2 replay | `jbd2.go`: circular buffer walk, tag parse, escape deobfuscation |
+| Orphan cleanup | `jbd2.go`: `S_last_orphan` list traversal, block + inode free |
+| State auto-clear | `reclaim.go`: `ClearSuperblockErrors()` sets `S_state = CLEAN` |
+| Recovery flag clear | `jbd2.go`: `EXT4_FEATURE_INCOMPAT_RECOVERY` cleared after replay |
+| Superblock flush | `Destroy()` calls `WriteSuperBlockPublic()` on unmount |
+| Graceful fallback | Journal replay failure → mount with warning (not block) |
+
+### Filesystem health
+
+| Command | Phase | What it checks |
+|---|---|---|
+| `werunos fsck` | 1 | Block bitmap vs `BG_free_blocks_count` for every group |
+| `werunos fsck` | 2 | Inode bitmap vs `BG_free_inodes_count` for every group |
+| `werunos fsck` | 3 | Every inode: type, extent tree, bounds, block count |
+| `werunos fsck` | 4 | Superblock free counts vs sum of group descriptors |
+| `werunos fsck` | 5 | Directory structure: `.`/`..`, duplicates, inode bounds |
+| `--fix` | any | Auto-corrects mismatched counts (block, inode, superblock) |
+
+### Ext4 structures
+
+| Structure | Read | Write | File |
+|---|---|---|---|
+| Superblock (1024B at offset 1024) |  `ReadSuperBlock` |  `writeSuperBlock` | `super.go` |
+| Group descriptors (32/64B each) |  `ReadGroupDescriptors` |  `WriteGroupDescriptor` | `bgdesc.go`, `allocate.go` |
+| Inodes (128/256B) |  `ReadInode` |  `WriteInode` | `inodes.go`, `allocate.go` |
+| Block bitmaps (1 block per group) |  via `fs.dev.ReadAt` |  via `fs.dev.WriteAt` | `allocate.go`, `reclaim.go` |
+| Inode bitmaps (1 block per group) |  via `fs.dev.ReadAt` |  via `fs.dev.WriteAt` | `allocate.go`, `reclaim.go` |
+| Extent trees (depth ≥0) |  `ReadExtents` |  `AppendExtent` | `extents.go`, `allocate.go` |
+| Directory entries (DirEntry2) |  `ReadDir`, `Lookup` |  `AddDirEntry`, `RemoveDirEntry` | `directory.go`, `dirent.go` |
+| jbd2 journal (circular buffer) |  replay only | (redo log used instead) | `jbd2.go` |
+| Symlinks (fast/slow) |  `ReadSymlink` |  via `I_block` / `WriteBlock` + `AppendExtent` | `symlinks.go`, `bridge.go` |
 
 ## Status
 
@@ -82,25 +143,6 @@ Contributions are welcome. If you plan to submit code:
 3. Submit a pull request with tests and a clear description of the change.
 
 Be careful when testing with real disks. Prefer disk images for development.
-
-## License
-
-Check the repository for a `LICENSE` file. If there is no license, the
-repository has no explicit grant for reuse and you should add a suitable
-license before redistributing.
-
-## Contact
-
-For questions or support open an issue on the project repository.
-
-2. Splitting the path by `/`
-3. For each component, calling `Lookup` on the current directory inode
-4. Reading the child inode
-5. Following symlinks in intermediate components (up to 40 deep)
-
-`Lookup` uses `ReadDirCached` which reads and caches the directory's entry
-list by `I_block` content.
-
 ### The disk layer
 
 #### block/device.go — partition reader
@@ -127,62 +169,6 @@ Detect GPT (UEFI) and MBR (legacy) partition tables. Parse all entries and
 return structured `Partition` objects with type, offset, size, and name.
 
 ---
-
-## Features
-
-### Core filesystem
-
-| Operation | Support | Implementation |
-|---|---|---|
-| Read files | ✅ | `reader.go`: extent walk, on-demand block reads |
-| Write files | ✅ | `writer.go`: block alloc, extent append, read-modify-write |
-| Create files | ✅ | `allocate.go`: inode alloc + init, `dirent.go`: add entry |
-| Delete files | ✅ | `dirent.go`: remove entry, `reclaim.go`: free blocks + inode |
-| Truncate (grow) | ✅ | `writer.go`: write zero-filled blocks |
-| Truncate (shrink) | ✅ | `reclaim.go`: split/cull extents, free blocks |
-| Directories | ✅ | Read, create (with `.`/`..`), delete (if empty), rename |
-| Rename | ✅ | Remove + add entries; handles existing target |
-| Symlinks | ✅ | Fast (in `I_block`) and slow (data block via extent tree) |
-| Hard links | ✅ | Link count tracked; directory linking blocked |
-| chmod | ✅ | `I_mode` permission bits updated, inode persisted |
-| chown | ✅ | `I_uid`/`I_gid` updated (full 32-bit via `L_i_uid_high`/`L_i_gid_high`) |
-
-### Crash safety
-
-| Protection | Implementation |
-|---|---|
-| Redo log | `redolog.go`: pre-read + log + fsync + write + truncate |
-| jbd2 replay | `jbd2.go`: circular buffer walk, tag parse, escape deobfuscation |
-| Orphan cleanup | `jbd2.go`: `S_last_orphan` list traversal, block + inode free |
-| State auto-clear | `reclaim.go`: `ClearSuperblockErrors()` sets `S_state = CLEAN` |
-| Recovery flag clear | `jbd2.go`: `EXT4_FEATURE_INCOMPAT_RECOVERY` cleared after replay |
-| Superblock flush | `Destroy()` calls `WriteSuperBlockPublic()` on unmount |
-| Graceful fallback | Journal replay failure → mount with warning (not block) |
-
-### Filesystem health
-
-| Command | Phase | What it checks |
-|---|---|---|
-| `werunos fsck` | 1 | Block bitmap vs `BG_free_blocks_count` for every group |
-| `werunos fsck` | 2 | Inode bitmap vs `BG_free_inodes_count` for every group |
-| `werunos fsck` | 3 | Every inode: type, extent tree, bounds, block count |
-| `werunos fsck` | 4 | Superblock free counts vs sum of group descriptors |
-| `werunos fsck` | 5 | Directory structure: `.`/`..`, duplicates, inode bounds |
-| `--fix` | any | Auto-corrects mismatched counts (block, inode, superblock) |
-
-### Ext4 structures
-
-| Structure | Read | Write | File |
-|---|---|---|---|
-| Superblock (1024B at offset 1024) | ✅ `ReadSuperBlock` | ✅ `writeSuperBlock` | `super.go` |
-| Group descriptors (32/64B each) | ✅ `ReadGroupDescriptors` | ✅ `WriteGroupDescriptor` | `bgdesc.go`, `allocate.go` |
-| Inodes (128/256B) | ✅ `ReadInode` | ✅ `WriteInode` | `inodes.go`, `allocate.go` |
-| Block bitmaps (1 block per group) | ✅ via `fs.dev.ReadAt` | ✅ via `fs.dev.WriteAt` | `allocate.go`, `reclaim.go` |
-| Inode bitmaps (1 block per group) | ✅ via `fs.dev.ReadAt` | ✅ via `fs.dev.WriteAt` | `allocate.go`, `reclaim.go` |
-| Extent trees (depth ≥0) | ✅ `ReadExtents` | ✅ `AppendExtent` | `extents.go`, `allocate.go` |
-| Directory entries (DirEntry2) | ✅ `ReadDir`, `Lookup` | ✅ `AddDirEntry`, `RemoveDirEntry` | `directory.go`, `dirent.go` |
-| jbd2 journal (circular buffer) | ✅ replay only | ❌ (redo log used instead) | `jbd2.go` |
-| Symlinks (fast/slow) | ✅ `ReadSymlink` | ✅ via `I_block` / `WriteBlock` + `AppendExtent` | `symlinks.go`, `bridge.go` |
 
 ### FUSE operations
 
@@ -295,7 +281,8 @@ Directories:     24
 Extents checked: 312
 Blocks ref'd:    28147
 
-✓ No problems found — filesystem is healthy
+
+No problems found — filesystem is healthy
 ```
 
 ---
@@ -319,30 +306,6 @@ and one extra write (log entry) per `WriteAt`. For interactive workloads
 For bulk operations (extracting archives, building code, database writes),
 performance is bottlenecked by the disk's random I/O speed. Typical throughput
 on a SATA SSD for sequential writes: 150-300 MB/s. Random 4K writes: 5-15 MB/s.
-
----
-
-## Compared to alternatives
-
-|                      | **werunos** | Paragon ExtFS ($20) | Ext2Fsd | WSL2 mount |
-|----------------------|-----------|---------------------|---------|-------------|
-| Read/write           | ✅        | ✅                  | ⚠️ broken| ✅          |
-| Raw disk access      | ✅        | ✅                  | ✅      | ❌          |
-| Journal replay       | ✅        | ❌                  | ❌      | ✅ (kernel) |
-| Orphan cleanup       | ✅        | ❌                  | ❌      | ✅ (kernel) |
-| Block reclamation    | ✅        | ✅                  | ❌      | ✅          |
-| Inode reclamation    | ✅        | ✅                  | ❌      | ✅          |
-| Crash-safe redo log  | ✅        | ❌                  | ❌      | N/A         |
-| Built-in fsck        | ✅        | ❌                  | ❌      | ❌          |
-| Auto-repair          | ✅        | ❌                  | ❌      | ❌          |
-| Unclean state clear  | ✅        | ❌                  | ❌      | ✅ (kernel) |
-| chmod / chown        | ✅        | ✅                  | ❌      | ✅          |
-| Symlinks             | ✅        | ✅                  | ❌      | ✅          |
-| Hard links           | ✅        | ✅                  | ❌      | ✅          |
-| Cross-directory mv   | ✅        | ✅                  | ❌      | ✅          |
-| Sector-aligned I/O   | ✅        | ✅                  | ❌      | N/A         |
-| Single binary        | ✅        | ❌ (driver install) | ✅      | ❌ (needs WSL) |
-| Free                 | ✅        | ❌ $20              | ✅      | ✅          |
 
 ---
 
