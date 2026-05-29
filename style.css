@@ -38,6 +38,42 @@ a:hover { color: var(--lavender); text-decoration: underline; }
 
 ::selection { background: #3a3450; color: var(--text); }
 
+/* ── Scrollbar ────────────────────────────────────────────────────── */
+
+/* Chromium */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #101014;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3836;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e4c48;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: #5e5c58;
+}
+
+::-webkit-scrollbar-corner {
+  background: #101014;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3836 #101014;
+}
+
 .page {
   max-width: 840px;
   margin: 0 auto;
