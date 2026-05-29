@@ -1,13 +1,13 @@
-# werunos
+# Werunos
 
-werunos is a userspace ext4 driver for Windows that mounts ext4 partitions
+Werunos is a userspace ext4 driver for Windows that mounts ext4 partitions
 as native Windows drives using WinFsp. It runs as a single binary, does not
 require kernel modules or WSL, and focuses on safe, consistent read-write
 access to ext4 media from Windows.
 
 ## Overview
 
-werunos provides full ext4 read-write support in userspace. It parses
+Werunos provides full ext4 read-write support in userspace. It parses
 on-disk structures, replays the jbd2 journal when needed, and exposes a
 POSIX-like interface through WinFsp. The implementation emphasizes data
 integrity and crash safety for writes to raw disks and disk images.
@@ -73,11 +73,11 @@ integrity and crash safety for writes to raw disks and disk images.
 
 | Command | Phase | What it checks |
 |---|---|---|
-| `werunos fsck` | 1 | Block bitmap vs `BG_free_blocks_count` for every group |
-| `werunos fsck` | 2 | Inode bitmap vs `BG_free_inodes_count` for every group |
-| `werunos fsck` | 3 | Every inode: type, extent tree, bounds, block count |
-| `werunos fsck` | 4 | Superblock free counts vs sum of group descriptors |
-| `werunos fsck` | 5 | Directory structure: `.`/`..`, duplicates, inode bounds |
+| `Werunos fsck` | 1 | Block bitmap vs `BG_free_blocks_count` for every group |
+| `Werunos fsck` | 2 | Inode bitmap vs `BG_free_inodes_count` for every group |
+| `Werunos fsck` | 3 | Every inode: type, extent tree, bounds, block count |
+| `Werunos fsck` | 4 | Superblock free counts vs sum of group descriptors |
+| `Werunos fsck` | 5 | Directory structure: `.`/`..`, duplicates, inode bounds |
 | `--fix` | any | Auto-corrects mismatched counts (block, inode, superblock) |
 
 ### Ext4 structures
@@ -197,7 +197,7 @@ All 12 standard FUSE filesystem operations are implemented in `host/bridge.go`:
 
 ### Prerequisites
 
-1. **WinFsp** — Install from [winfsp.dev](https://winfsp.dev) or run `werunos install` (Admin prompt required)
+1. **WinFsp** — Install from [winfsp.dev](https://winfsp.dev) or run `Werunos install` (Admin prompt required)
 2. **Administrator privileges** — Raw disk access requires elevation
 
 ### Setup
@@ -290,7 +290,7 @@ No problems found — filesystem is healthy
 ## Building
 
 ```powershell
-go build -o werunos.exe .
+go build -o Werunos.exe .
 ```
 
 Requires Go 1.21+. The only external dependency is `github.com/winfsp/cgofuse`.
@@ -328,14 +328,14 @@ on a SATA SSD for sequential writes: 150-300 MB/s. Random 4K writes: 5-15 MB/s.
 
 **Will this corrupt my Linux partition?**
 
-The redo log makes every write recoverable. If werunos crashes mid-write, the
+The redo log makes every write recoverable. If Werunos crashes mid-write, the
 next startup restores the pre-write state. Journal replay and fsck provide
 additional layers of protection. That said, this is filesystem-level code —
 there are no absolute guarantees. Back up your data.
 
 **How do I unmount?**
 
-Press Ctrl+C in the terminal where `werunos mount` is running.
+Press Ctrl+C in the terminal where `Werunos mount` is running.
 
 **What happens if the power goes out while writing?**
 
@@ -351,7 +351,7 @@ not touch ext4 partitions.
 **Why not use WSL2?**
 
 WSL2's `wsl --mount` works but requires WSL2 installed, a running Linux VM,
-and the drive must be mountable as a volume. werunos is a single Windows binary
+and the drive must be mountable as a volume. Werunos is a single Windows binary
 with no dependencies beyond WinFsp.
 
 **What ext4 features are NOT supported?**
