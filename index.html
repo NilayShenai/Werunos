@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Werunos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="page">
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <h1 class="project-name">W E R U N O S</h1>
+    <p class="project-sub">A userspace ext4 driver for Windows</p>
+    <p class="project-meta-line">
+      <span>Go 1.26</span>
+      <span class="meta-dot">&middot;</span>
+      <span>WinFsp (cgofuse v1.6.0)</span>
+      <span class="meta-dot">&middot;</span>
+      <span>MIT License</span>
+      <span class="meta-dot">&middot;</span>
+      <a href="https://github.com/NilayShenai/Werunos">github.com/NilayShenai/Werunos</a>
+    </p>
+    <a class="btn-download" href="https://github.com/NilayShenai/Werunos/releases/download/1.0/werunos.exe">Download Pre-release</a>
+  </div>
+</header>
+
+<div class="layout-card">
+  <div class="layout-title">ext4 volume layout</div>
+  <div class="layout-bar">
+    <span class="layout-seg seg-boot"></span>
+    <span class="layout-seg seg-super"></span>
+    <span class="layout-seg seg-group"></span>
+    <span class="layout-seg seg-data"></span>
+  </div>
+  <div class="layout-legend">
+    <span><i class="legend-swatch swatch-boot"></i>Boot sector</span>
+    <span><i class="legend-swatch swatch-super"></i>Superblock</span>
+    <span><i class="legend-swatch swatch-group"></i>Group descriptors</span>
+    <span><i class="legend-swatch swatch-data"></i>Block groups</span>
+  </div>
+  <div class="layout-addr">
+    <span>0x0000</span>
+    <span>0x0400</span>
+    <span>0x0800</span>
+    <span>0x1000+</span>
+  </div>
+</div>
+
+<main>
+
+<div class="split">
+  <section class="chapter" id="overview">
+    <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0001</div>
+    <h2 class="ch-title">Overview</h2>
+    <p class="ch-text">
+      Werunos provides full ext4 read-write support in userspace. It parses
+      on-disk structures, replays the jbd2 journal when needed, and exposes a
+      POSIX-like interface through WinFsp. The implementation emphasizes data
+      integrity and crash safety for writes to raw disks and disk images.
+    </p>
+    <p class="ch-text">
+      Every ext4 filesystem is composed of block groups. Each group contains
+      a block bitmap, an inode bitmap, an inode table, and data blocks.
+      Werunos navigates this structure directly, reading and writing the
+      superblock, group descriptors, inodes, extent trees, and directory
+      entries at the block level.
+    </p>
+    <aside class="ch-note">
+      <span class="note-indicator">&#x25C6;</span>
+      jbd2 journal replay, crash-safe redo log, and a 5-phase fsck
+      are built into the driver itself.
+    </aside>
+  </section>
+
+  <section class="chapter" id="topology">
+    <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0004</div>
+    <h2 class="ch-title">Internal Topology</h2>
+
+    <div class="arch">
+      <div class="arch-layer">
+        <div class="arch-name">Windows / NT</div>
+      </div>
+      <div class="arch-arrow"></div>
+      <div class="arch-layer">
+        <div class="arch-name">WinFsp (FUSE)</div>
+        <div class="arch-info">FileSystemInterface <span class="arch-sep">&middot;</span> Mount point <span class="arch-sep">&middot;</span> Drive letter</div>
+      </div>
+      <div class="arch-arrow"></div>
+      <div class="arch-layer arch-mid">
+        <div class="arch-name">Werunos</div>
+        <div class="arch-grid">
+          <div class="arch-comp">
+            <div class="arch-comp-name">ext4 parser</div>
+            <div class="arch-comp-info">superblock, inodes, extents, directories, symlinks</div>
+          </div>
+          <div class="arch-comp">
+            <div class="arch-comp-name">jbd2 journal</div>
+            <div class="arch-comp-info">replay engine, orphan cleanup, recovery flag</div>
+          </div>
+          <div class="arch-comp">
+            <div class="arch-comp-name">redo log</div>
+            <div class="arch-comp-info">pre-read, log, fsync, write, truncate</div>
+          </div>
+          <div class="arch-comp">
+            <div class="arch-comp-name">fsck</div>
+            <div class="arch-comp-info">block bitmaps, inode bitmaps, inode walks, counts</div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-arrow"></div>
+      <div class="arch-layer">
+        <div class="arch-name">Raw Disk I/O</div>
+        <div class="arch-info">PhysicalDrive <span class="arch-sep">&middot;</span> PartitionReader <span class="arch-sep">&middot;</span> MBR/GPT <span class="arch-sep">&middot;</span> Image files</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="superblock-card">
+  <div class="sb-header">ext4 superblock</div>
+  <div class="sb-grid">
+    <div class="sb-item">
+      <div class="sb-label">magic</div>
+      <div class="sb-value">0xEF53</div>
+    </div>
+    <div class="sb-item">
+      <div class="sb-label">volume</div>
+      <div class="sb-value">Werunos</div>
+    </div>
+    <div class="sb-item">
+      <div class="sb-label">blocks</div>
+      <div class="sb-value">262144</div>
+    </div>
+    <div class="sb-item">
+      <div class="sb-label">inodes</div>
+      <div class="sb-value">65536</div>
+    </div>
+    <div class="sb-item">
+      <div class="sb-label">bsize</div>
+      <div class="sb-value">4096</div>
+    </div>
+    <div class="sb-item">
+      <div class="sb-label">groups</div>
+      <div class="sb-value">8</div>
+    </div>
+    <div class="sb-item sb-wide">
+      <div class="sb-label">features</div>
+      <div class="sb-value sb-features">
+        <span class="sb-chip">extents</span>
+        <span class="sb-chip">flex_bg</span>
+        <span class="sb-chip">64bit</span>
+        <span class="sb-chip">sparse_super</span>
+        <span class="sb-chip">journal</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="chapter" id="capabilities">
+  <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0002</div>
+  <h2 class="ch-title">Capabilities</h2>
+
+  <div class="cap-grid">
+    <div class="cap-group">
+      <h3 class="cap-group-title">Operations</h3>
+      <ul class="cap-list">
+        <li>read</li>
+        <li>write</li>
+        <li>create</li>
+        <li>delete</li>
+        <li>rename</li>
+        <li>truncate (grow / shrink)</li>
+        <li>chmod</li>
+        <li>chown</li>
+        <li>hard link</li>
+        <li>symlink (fast / slow)</li>
+        <li>mkdir / rmdir</li>
+        <li>readdir</li>
+      </ul>
+    </div>
+    <div class="cap-group">
+      <h3 class="cap-group-title">Crash Safety</h3>
+      <ul class="cap-list">
+        <li>jbd2 journal replay</li>
+        <li>orphan inode cleanup</li>
+        <li>external redo log</li>
+        <li>superblock flush on unmount</li>
+        <li>graceful fallback on replay failure</li>
+        <li>recovery flag auto-clear</li>
+      </ul>
+    </div>
+    <div class="cap-group">
+      <h3 class="cap-group-title">Integrity</h3>
+      <ul class="cap-list">
+        <li>5-phase fsck</li>
+        <li>block bitmap verification</li>
+        <li>inode bitmap verification</li>
+        <li>inode structure validation</li>
+        <li>superblock count reconciliation</li>
+        <li>directory structure checks</li>
+        <li>auto-repair (--fix flag)</li>
+      </ul>
+    </div>
+    <div class="cap-group">
+      <h3 class="cap-group-title">Partition Support</h3>
+      <ul class="cap-list">
+        <li>GPT partition tables</li>
+        <li>MBR partition tables</li>
+        <li>raw disk images</li>
+        <li>sector-aligned I/O</li>
+        <li>PhysicalDrive raw access</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="structure">
+  <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0003</div>
+  <h2 class="ch-title">Source Structure</h2>
+
+  <pre class="tree">.
+├── <span class="t-f">main.go</span>              CLI entry point, mount/fsck dispatch
+├── <span class="t-f">install.go</span>           WinFsp installer
+├── <span class="t-d">block/</span>
+│   ├── <span class="t-f">device.go</span>          PartitionReader, wraps disk I/O
+│   ├── <span class="t-f">aligned.go</span>         sector-aligned reads/writes
+│   ├── <span class="t-f">gpt.go</span>             GPT parser
+│   ├── <span class="t-f">mbr.go</span>             MBR parser
+│   └── <span class="t-f">enum_windows.go</span>    Windows disk enumeration
+├── <span class="t-d">host/</span>
+│   ├── <span class="t-f">bridge.go</span>          WinFsp FUSE bridge (12 ops)
+│   └── <span class="t-f">handles.go</span>         file/dir handle tables
+├── <span class="t-d">vfs/</span>
+│   ├── <span class="t-f">core.go</span>            FileSystem, Walk, ReadWriterAt
+│   ├── <span class="t-f">super.go</span>           Superblock (311 lines)
+│   ├── <span class="t-f">bgdesc.go</span>          Block group descriptors
+│   ├── <span class="t-f">inodes.go</span>          Inode read/write
+│   ├── <span class="t-f">extents.go</span>         Extent tree (depth-0)
+│   ├── <span class="t-f">directory.go</span>       Directory reading
+│   ├── <span class="t-f">dirent.go</span>          Entry add/remove
+│   ├── <span class="t-f">allocate.go</span>        Block and inode allocator
+│   ├── <span class="t-f">reclaim.go</span>         Block/inode freeing
+│   ├── <span class="t-f">writer.go</span>          File writing, extent append
+│   ├── <span class="t-f">reader.go</span>          File reading, extent walk
+│   ├── <span class="t-f">jbd2.go</span>            Journal replay (296 lines)
+│   ├── <span class="t-f">redolog.go</span>         Crash-safe redo log (198 lines)
+│   ├── <span class="t-f">symlinks.go</span>        Fast/slow symlink resolution
+│   └── <span class="t-f">health.go</span>          fsck implementation (392 lines)
+└── <span class="t-d">docs/</span>
+    └── <span class="t-d">ext4/</span> (28 files)   ext4 on-disk reference</pre>
+  <figcaption class="fig-cap">
+    ~5000 lines of Go. Single external dependency: github.com/winfsp/cgofuse.
+  </figcaption>
+</section>
+
+<section class="chapter" id="usage">
+  <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0005</div>
+  <h2 class="ch-title">Usage</h2>
+
+  <div class="cmd">
+    <span class="cmd-tag">enumeration</span>
+    <div class="cmd-block">
+      <code class="cmd-code">werunos devices</code>
+      <button class="cmd-copy" data-cmd="werunos devices" aria-label="Copy command">&#x29C9;</button>
+    </div>
+    <p class="cmd-desc">List all physical disks and their partition tables.</p>
+  </div>
+
+  <div class="cmd">
+    <span class="cmd-tag">mount</span>
+    <div class="cmd-block">
+      <code class="cmd-code">werunos mount &lt;letter&gt; &lt;disk&gt; &lt;part&gt;</code>
+      <button class="cmd-copy" data-cmd="werunos mount <letter> <disk> <part>" aria-label="Copy command">&#x29C9;</button>
+    </div>
+    <p class="cmd-desc">Mount an ext4 partition as a Windows drive letter. Blocks until Ctrl+C.</p>
+    <div class="cmd-example">
+      <span class="cmd-example-label">example</span>
+      <code>werunos mount G: 0 4</code>
+    </div>
+  </div>
+
+  <div class="cmd">
+    <span class="cmd-tag">integrity</span>
+    <div class="cmd-block">
+      <code class="cmd-code">werunos fsck [--fix] &lt;device&gt; [&lt;part&gt;]</code>
+      <button class="cmd-copy" data-cmd="werunos fsck [--fix] <device> [<part>]" aria-label="Copy command">&#x29C9;</button>
+    </div>
+    <p class="cmd-desc">5-phase integrity check across block bitmaps, inode bitmaps, inode structures, superblock counts, and directory entries. Pass <code>--fix</code> to auto-correct mismatched counts.</p>
+    <div class="cmd-example">
+      <span class="cmd-example-label">example</span>
+      <code>werunos fsck --fix \\.\PhysicalDrive0 4</code>
+    </div>
+  </div>
+
+  <div class="cmd">
+    <span class="cmd-tag">setup</span>
+    <div class="cmd-block">
+      <code class="cmd-code">werunos install</code>
+      <button class="cmd-copy" data-cmd="werunos install" aria-label="Copy command">&#x29C9;</button>
+    </div>
+    <p class="cmd-desc">Download and install WinFsp. Requires Administrator privileges.</p>
+  </div>
+
+  <div class="cmd">
+    <span class="cmd-tag">inspection</span>
+    <div class="cmd-block">
+      <code class="cmd-code">werunos &lt;device&gt; [&lt;part&gt;]</code>
+      <button class="cmd-copy" data-cmd="werunos <device> [<part>]" aria-label="Copy command">&#x29C9;</button>
+    </div>
+    <p class="cmd-desc">Without a subcommand, probe partitions on a device or list the root directory of an ext4 volume.</p>
+    <div class="cmd-example">
+      <span class="cmd-example-label">example</span>
+      <code>werunos testfs.img</code>
+    </div>
+  </div>
+
+  <aside class="ch-note cmd-note">
+    <span class="note-indicator">&#x25C6;</span>
+    Raw disk paths on Windows take the form <code>\\.\PhysicalDriveN</code>.
+    Werunos replays the jbd2 journal and clears the recovery flag automatically
+    on first mount after an unclean shutdown.
+  </aside>
+</section>
+
+<section class="chapter" id="boundaries">
+  <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0006</div>
+  <h2 class="ch-title">Known Boundaries</h2>
+
+  <div class="bound-wrap">
+    <table class="bound-tbl">
+      <thead>
+        <tr>
+          <th>Limitation</th>
+          <th>Impact</th>
+          <th>Rationale</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="b-term">Depth-0 extents</td>
+          <td>Files with &gt;4 non-contiguous extents cannot extend</td>
+          <td>Full B-tree manipulation is ~500 additional lines</td>
+        </tr>
+        <tr>
+          <td class="b-term">No journal submission</td>
+          <td>Metadata writes bypass jbd2; redo log covers crashes</td>
+          <td>jbd2 transaction pipeline requires descriptor/data/commit</td>
+        </tr>
+        <tr>
+          <td class="b-term">No EA writes</td>
+          <td>Extended attributes preserved but not modified</td>
+          <td>EA area lives beyond 128-byte base inode</td>
+        </tr>
+        <tr>
+          <td class="b-term">No inline data</td>
+          <td>EXT4_INLINE_DATA_FL inodes skipped on write</td>
+          <td>Separate read/write paths needed</td>
+        </tr>
+        <tr>
+          <td class="b-term">No encryption</td>
+          <td>EXT4_ENCRYPT_FL files skipped</td>
+          <td>Requires kernel keyring integration</td>
+        </tr>
+        <tr>
+          <td class="b-term">No metadata checksums</td>
+          <td>metadata_csum not verified or updated</td>
+          <td>Checksum verification would add ~200 lines</td>
+        </tr>
+        <tr>
+          <td class="b-term">No orphan_file</td>
+          <td>Uses legacy S_last_orphan list</td>
+          <td>Linux 5.15+ orphan file is separate linked-list</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <aside class="bound-notes">
+      <div class="b-note">
+        <span class="b-note-ref">depth-0</span>
+        <span class="b-note-body">The extent tree is stored inline in the inode (i_block, 60 bytes). A 12-byte header plus four 12-byte extents fit. Index blocks for deeper trees are not yet implemented.</span>
+      </div>
+      <div class="b-note">
+        <span class="b-note-ref">redo log</span>
+        <span class="b-note-body">On every WriteAt: pre-read the target block, write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed to restore pre-write state.</span>
+      </div>
+      <div class="b-note">
+        <span class="b-note-ref">testing</span>
+        <span class="b-note-body">Prefer disk images over real drives. ext4 is complex and there are no absolute guarantees. The redo log provides crash recovery, but always back up important data.</span>
+      </div>
+    </aside>
+  </div>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <div class="colophon-inner">
+    <p class="colophon-line">
+      <span class="colophon-l">built for</span> Windows
+      <span class="colophon-dot">&middot;</span>
+      <span class="colophon-l">reads</span> ext4
+      <span class="colophon-dot">&middot;</span>
+      <span class="colophon-l">license</span> MIT
+    </p>
+    <p class="colophon-line">
+      <span class="colophon-l">repository</span>
+      <a href="https://github.com/NilayShenai/Werunos">github.com/NilayShenai/Werunos</a>
+    </p>
+  </div>
+</footer>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
