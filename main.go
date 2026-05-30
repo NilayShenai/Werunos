@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -88,6 +90,7 @@ func run() error {
 		}
 		return runReadPartition(os.Args[1], n)
 	default:
+<<<<<<< HEAD
 		return fmt.Errorf(
 			"usage:\n" +
 				"  werunos install                          install WinFsp (requires Admin)\n" +
@@ -98,6 +101,20 @@ func run() error {
 				"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n" +
 				"  (supports ext4 and btrfs filesystems)\n",
 		)
+=======
+		usage := "usage:\n" +
+			"  werunos install                          install dependencies (requires Admin/sudo)\n" +
+			"  werunos devices                          list physical disks\n" +
+			"  werunos fsck [--fix] <device> [<part>]   check/repair ext4 filesystem\n" +
+			"  werunos <device>                         list partitions on device\n" +
+			"  werunos <device> <partNum>               read root dir of partition\n"
+		if runtime.GOOS == "windows" {
+			usage += "  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n"
+		} else {
+			usage += "  werunos mount <dir> <disk> <partNum>     mount partition as a directory\n"
+		}
+		return fmt.Errorf("%s", usage)
+>>>>>>> fe95509 (made it compatible with mac)
 	}
 }
 
@@ -143,7 +160,11 @@ func runDevices() error {
 
 	if len(disks) == 0 {
 		fmt.Println("No physical disks found.")
-		fmt.Println("On Windows, ensure you are running as Administrator.")
+		if runtime.GOOS == "windows" {
+			fmt.Println("On Windows, ensure you are running as Administrator.")
+		} else {
+			fmt.Println("Ensure you are running with sudo (root privileges).")
+		}
 		return nil
 	}
 
@@ -179,47 +200,137 @@ func runDevices() error {
 	}
 
 	fmt.Println("To mount a partition:")
-	fmt.Println("  werunos mount <letter> <diskNum> <partNum>")
-	fmt.Println("  Example: werunos mount G: 0 1")
+	if runtime.GOOS == "windows" {
+		fmt.Println("  werunos mount <letter> <diskNum> <partNum>")
+		fmt.Println("  Example: werunos mount G: 0 1")
+	} else {
+		fmt.Println("  werunos mount <dir> <diskNum> <partNum>")
+		fmt.Println("  Example: sudo werunos mount /Volumes/ext4 0 1")
+	}
 	return nil
 }
 
 func runMount() error {
 	args := os.Args
+<<<<<<< HEAD
 	if len(args) < 4 || len(args) > 5 {
 		return fmt.Errorf(
 			"usage: werunos mount <letter> <diskNum|imagePath> [<partNum>]\n" +
 				"  example: werunos mount G: 0 1              (physical disk partition)\n" +
 				"  example: werunos mount G: testfs.img       (raw ext4/btrfs image file)\n",
 		)
+=======
+	
+	var mountPoint string
+	var imagePath string
+	var diskNumStr string
+	var partNumStr string
+	var isImage bool
+	
+	if len(args) == 3 {
+		imagePath = args[2]
+		isImage = true
+	} else if len(args) == 4 {
+		if _, err := strconv.Atoi(args[3]); err == nil {
+			diskNumStr = args[2]
+			partNumStr = args[3]
+			isImage = false
+		} else {
+			mountPoint = args[2]
+			imagePath = args[3]
+			isImage = true
+		}
+	} else if len(args) == 5 {
+		mountPoint = args[2]
+		diskNumStr = args[3]
+		partNumStr = args[4]
+		isImage = false
+	} else {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf(
+				"usage:\n" +
+					"  werunos mount <letter> <diskNum|imagePath> [<partNum>]\n" +
+					"  werunos mount <diskNum|imagePath> [<partNum>]             (auto-determine letter)\n",
+			)
+		} else {
+			return fmt.Errorf(
+				"usage:\n" +
+					"  werunos mount <dir> <diskNum|imagePath> [<partNum>]\n" +
+					"  werunos mount <diskNum|imagePath> [<partNum>]             (auto-determine dir)\n",
+			)
+		}
+>>>>>>> fe95509 (made it compatible with mac)
 	}
 
-	mountPoint := args[2]
-	if len(mountPoint) == 1 && mountPoint[0] >= 'A' && mountPoint[0] <= 'Z' ||
-		len(mountPoint) == 1 && mountPoint[0] >= 'a' && mountPoint[0] <= 'z' {
-		mountPoint = strings.ToUpper(mountPoint) + ":"
+	if isImage {
+		if mountPoint != "" && runtime.GOOS == "windows" {
+			if len(mountPoint) == 1 && mountPoint[0] >= 'A' && mountPoint[0] <= 'Z' ||
+				len(mountPoint) == 1 && mountPoint[0] >= 'a' && mountPoint[0] <= 'z' {
+				mountPoint = strings.ToUpper(mountPoint) + ":"
+			}
+		} else if mountPoint != "" {
+			if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
+				fmt.Printf("Mount point directory %s does not exist. Creating it...\n", mountPoint)
+				if err := os.MkdirAll(mountPoint, 0755); err != nil {
+					return fmt.Errorf("failed to create mount point directory: %w", err)
+				}
+			}
+		}
+		return runMountImage(mountPoint, imagePath)
 	}
 
+<<<<<<< HEAD
 	if len(args) == 4 {
 		return runMountImage(mountPoint, args[3])
 	}
 
 	diskNum, err := strconv.Atoi(args[3])
+=======
+	diskNum, err := strconv.Atoi(diskNumStr)
+>>>>>>> fe95509 (made it compatible with mac)
 	if err != nil {
-		return runMountImage(mountPoint, args[3])
+		return fmt.Errorf("diskNum must be an integer, got %q", diskNumStr)
 	}
 
-	partNum, err := strconv.Atoi(args[4])
+	partNum, err := strconv.Atoi(partNumStr)
 	if err != nil {
-		return fmt.Errorf("partNum must be an integer, got %q", args[4])
+		return fmt.Errorf("partNum must be an integer, got %q", partNumStr)
 	}
 
-	diskPath := fmt.Sprintf(`\\.\PhysicalDrive%d`, diskNum)
+	if mountPoint != "" && runtime.GOOS == "windows" {
+		if len(mountPoint) == 1 && mountPoint[0] >= 'A' && mountPoint[0] <= 'Z' ||
+			len(mountPoint) == 1 && mountPoint[0] >= 'a' && mountPoint[0] <= 'z' {
+			mountPoint = strings.ToUpper(mountPoint) + ":"
+		}
+	} else if mountPoint != "" {
+		if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
+			fmt.Printf("Mount point directory %s does not exist. Creating it...\n", mountPoint)
+			if err := os.MkdirAll(mountPoint, 0755); err != nil {
+				return fmt.Errorf("failed to create mount point directory: %w", err)
+			}
+		}
+	}
+
+	var diskPath string
+	var elevationPrompt string
+	if runtime.GOOS == "windows" {
+		diskPath = fmt.Sprintf(`\\.\PhysicalDrive%d`, diskNum)
+		elevationPrompt = "Ensure werunos is running as Administrator."
+	} else {
+		diskPath = fmt.Sprintf("/dev/rdisk%d", diskNum)
+		elevationPrompt = "Ensure werunos is running with sudo (root privileges)."
+	}
+
 	f, err := os.OpenFile(diskPath, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf(
+<<<<<<< HEAD
 			"failed to open disk %q: %w\nEnsure werunos is running as Administrator.",
 			diskPath, err,
+=======
+			"failed to open disk %q: %w\n%s",
+			diskPath, err, elevationPrompt,
+>>>>>>> fe95509 (made it compatible with mac)
 		)
 	}
 	defer f.Close()
@@ -266,8 +377,124 @@ func runMount() error {
 		return fmt.Errorf("failed to detect filesystem: %w", err)
 	}
 
+<<<<<<< HEAD
 	fmt.Printf("Detected filesystem: %s\n", filesys.Type())
 	return mountFilesystem(filesys, mountPoint, filesys.Type())
+=======
+	sb, err := fs.ReadSuperBlock()
+	if err != nil {
+		return fmt.Errorf("failed to read ext4 superblock: %w", err)
+	}
+
+	volName := string(bytes.Trim(sb.S_volume_name[:], "\x00"))
+	if volName == "" {
+		volName = "ext4"
+	}
+
+	volName = sanitizeVolName(volName)
+	fmt.Printf("ext4 volume: %q (sanitized), block size: %d bytes\n", volName, fs.BlockSize)
+
+	var autoCreated bool
+	if mountPoint == "" {
+		if volName == "ext4" || volName == "" {
+			mountPoint = fmt.Sprintf("/tmp/werunos_mounts/disk%d_p%d", diskNum, partNum)
+		} else {
+			mountPoint = fmt.Sprintf("/tmp/werunos_mounts/%s", volName)
+		}
+		
+		baseMountPoint := mountPoint
+		suffix := 1
+		for {
+			if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
+				break
+			}
+			mountPoint = fmt.Sprintf("%s_%d", baseMountPoint, suffix)
+			suffix++
+		}
+		
+		fmt.Printf("Auto-determined mount point: %s\n", mountPoint)
+		if err := os.MkdirAll(mountPoint, 0755); err != nil {
+			return fmt.Errorf("failed to create mount point directory: %w", err)
+		}
+		autoCreated = true
+	}
+
+	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN || fs.JournalNeedsRecovery() {
+		fmt.Println("→ Filesystem needs recovery (journal replay + orphan cleanup)...")
+		res := fs.Recover()
+		if res.JournalReplayed {
+			fmt.Printf("  ✓ Journal replayed: %d metadata blocks in %d transactions\n",
+				res.BlocksApplied, res.Transactions)
+		}
+		if res.OrphansCleaned > 0 {
+			fmt.Printf("  ✓ Orphan inodes cleaned: %d\n", res.OrphansCleaned)
+		}
+		if res.JournalSkipped != "" {
+			fmt.Printf("  ⚠ Journal skipped: %s\n", res.JournalSkipped)
+		}
+		if !res.JournalReplayed && res.OrphansCleaned == 0 {
+			fmt.Println("  (nothing needed)")
+		}
+	}
+
+	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN {
+		fmt.Printf(
+			"WARNING: filesystem state is 0x%04x (expected 0x0001 = CLEAN).\n",
+			sb.S_state,
+		)
+		if sb.S_state&(vfs.SUPERBLOCK_STATE_ERRORS|vfs.SUPERBLOCK_STATE_ORPHAN) != 0 {
+			fmt.Println("  This is normal after an unclean shutdown. Clearing state and proceeding.")
+			fs.ClearSuperblockErrors()
+		} else {
+			return fmt.Errorf("unrecognised filesystem state 0x%04x - cannot mount safely", sb.S_state)
+		}
+	}
+	fs.EnsureRecoveryFlagIsClear()
+
+	if err := fs.ReadGroupDescriptors(); err != nil {
+		return fmt.Errorf("failed to read block group descriptors: %w", err)
+	}
+
+	OrionFS := host.NewOrionFS(fs)
+	fuseSrv := fuse.NewFileSystemHost(OrionFS)
+
+	var mountArgs []string
+	if runtime.GOOS == "windows" {
+		mountArgs = []string{
+			"-o", fmt.Sprintf("uid=-1,gid=-1,volname=%s", volName),
+		}
+		fmt.Printf("Mount args: %v\n", mountArgs)
+		fmt.Printf("\nMounting at %s … (press Ctrl+C or right-click → Eject to unmount)\n", mountPoint)
+		fmt.Println("Tip: to make this drive visible to ALL users, launch with: psexec -i -s werunos.exe mount ...")
+		fmt.Println()
+	} else {
+		mountArgs = []string{
+			"-o", fmt.Sprintf("volname=%s", volName),
+			"-o", "local",
+		}
+		if os.Getuid() == 0 {
+			mountArgs = append(mountArgs, "-o", "allow_other")
+		}
+		fmt.Printf("Mount args: %v\n", mountArgs)
+		fmt.Printf("\nMounting at %s … (press Ctrl+C to unmount)\n", mountPoint)
+		fmt.Println()
+	}
+
+	ok := fuseSrv.Mount(mountPoint, mountArgs)
+	if autoCreated {
+		os.Remove(mountPoint)
+	}
+	if !ok {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("mount failed - ensure WinFsp is installed (https://winfsp.dev) and werunos is running as Administrator\nFor all-user visibility, run as SYSTEM: psexec -i -s werunos.exe mount ...")
+		} else {
+			return fmt.Errorf("mount failed - ensure macFUSE is installed (https://macfuse.github.io) and werunos is running with sudo")
+		}
+	}
+
+	fmt.Println("Unmounted successfully.")
+	return nil
+>>>>>>> fe95509 (made it compatible with mac)
 }
 
 func runMountImage(mountPoint, imagePath string) error {
@@ -290,8 +517,122 @@ func runMountImage(mountPoint, imagePath string) error {
 		return fmt.Errorf("failed to detect filesystem: %w", err)
 	}
 
+<<<<<<< HEAD
 	fmt.Printf("Detected filesystem: %s\n", filesys.Type())
 	return mountFilesystem(filesys, mountPoint, filesys.Type())
+=======
+	fs, err := vfs.NewFileSystem(safeDev)
+	if err != nil {
+		return fmt.Errorf("failed to initialise ext4 filesystem: %w", err)
+	}
+
+	sb, err := fs.ReadSuperBlock()
+	if err != nil {
+		return fmt.Errorf("failed to read ext4 superblock: %w", err)
+	}
+
+	volName := string(bytes.Trim(sb.S_volume_name[:], "\x00"))
+	if volName == "" {
+		volName = "ext4"
+	}
+	volName = sanitizeVolName(volName)
+	fmt.Printf("ext4 volume: %q (sanitized), block size: %d bytes\n", volName, fs.BlockSize)
+
+	var autoCreated bool
+	if mountPoint == "" {
+		if volName == "ext4" || volName == "" {
+			baseName := filepath.Base(imagePath)
+			if ext := filepath.Ext(baseName); ext != "" {
+				baseName = strings.TrimSuffix(baseName, ext)
+			}
+			mountPoint = fmt.Sprintf("/tmp/werunos_mounts/%s", sanitizeVolName(baseName))
+		} else {
+			mountPoint = fmt.Sprintf("/tmp/werunos_mounts/%s", volName)
+		}
+		
+		baseMountPoint := mountPoint
+		suffix := 1
+		for {
+			if _, err := os.Stat(mountPoint); os.IsNotExist(err) {
+				break
+			}
+			mountPoint = fmt.Sprintf("%s_%d", baseMountPoint, suffix)
+			suffix++
+		}
+		
+		fmt.Printf("Auto-determined mount point: %s\n", mountPoint)
+		if err := os.MkdirAll(mountPoint, 0755); err != nil {
+			return fmt.Errorf("failed to create mount point directory: %w", err)
+		}
+		autoCreated = true
+	}
+
+	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN || fs.JournalNeedsRecovery() {
+		fmt.Println("→ Filesystem needs recovery (journal replay + orphan cleanup)...")
+		res := fs.Recover()
+		if res.JournalReplayed {
+			fmt.Printf("  ✓ Journal replayed: %d metadata blocks in %d transactions\n",
+				res.BlocksApplied, res.Transactions)
+		}
+		if res.OrphansCleaned > 0 {
+			fmt.Printf("  ✓ Orphan inodes cleaned: %d\n", res.OrphansCleaned)
+		}
+		if res.JournalSkipped != "" {
+			fmt.Printf("  ⚠ Journal skipped: %s\n", res.JournalSkipped)
+		}
+		if !res.JournalReplayed && res.OrphansCleaned == 0 {
+			fmt.Println("  (nothing needed)")
+		}
+	}
+
+	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN {
+		fmt.Printf("WARNING: filesystem state is 0x%04x (expected 0x0001 = CLEAN).\n", sb.S_state)
+		if sb.S_state&(vfs.SUPERBLOCK_STATE_ERRORS|vfs.SUPERBLOCK_STATE_ORPHAN) != 0 {
+			fmt.Println("  This is normal after an unclean shutdown. Clearing state and proceeding.")
+			fs.ClearSuperblockErrors()
+		} else {
+			return fmt.Errorf("unrecognised filesystem state 0x%04x", sb.S_state)
+		}
+	}
+	fs.EnsureRecoveryFlagIsClear()
+
+	if err := fs.ReadGroupDescriptors(); err != nil {
+		return fmt.Errorf("failed to read block group descriptors: %w", err)
+	}
+
+	hostFS := host.NewOrionFS(fs)
+	fuseSrv := fuse.NewFileSystemHost(hostFS)
+	
+	var mountArgs []string
+	if runtime.GOOS == "windows" {
+		mountArgs = []string{"-o", fmt.Sprintf("uid=-1,gid=-1,volname=%s", volName)}
+		fmt.Printf("\nMounting at %s … (press Ctrl+C or right-click → Eject to unmount)\n", mountPoint)
+	} else {
+		mountArgs = []string{
+			"-o", fmt.Sprintf("volname=%s", volName),
+			"-o", "local",
+		}
+		if os.Getuid() == 0 {
+			mountArgs = append(mountArgs, "-o", "allow_other")
+		}
+		fmt.Printf("\nMounting at %s … (press Ctrl+C to unmount)\n", mountPoint)
+	}
+
+	ok := fuseSrv.Mount(mountPoint, mountArgs)
+	if autoCreated {
+		os.Remove(mountPoint)
+	}
+	if !ok {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("mount failed - ensure WinFsp is installed")
+		} else {
+			return fmt.Errorf("mount failed - ensure macFUSE is installed")
+		}
+	}
+
+	fmt.Println("Unmounted successfully.")
+	return nil
+>>>>>>> fe95509 (made it compatible with mac)
 }
 
 func runFsck(devicePath string, fix bool) error {
@@ -431,7 +772,11 @@ func runImagePath(path string, f *os.File) error {
 func runListPartitions(devicePath string) error {
 	f, err := os.Open(devicePath)
 	if err != nil {
+<<<<<<< HEAD
 		return fmt.Errorf("failed to open %q: %w", devicePath, err)
+=======
+		return fmt.Errorf("failed to open %q: %w\n(Ensure you are running with sudo/Administrator privileges.)", devicePath, err)
+>>>>>>> fe95509 (made it compatible with mac)
 	}
 	defer f.Close()
 

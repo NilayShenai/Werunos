@@ -108,25 +108,24 @@ Werunos is advanced and production-ready, but since it interacts directly with y
 
 Prerequisites:
 
-- Go installed on your machine. Recommended: Go 1.18 or newer.
-- WinFsp installed on Windows for FUSE support.
+- Go installed on your machine (Go 1.21 or newer recommended).
+- **Windows:** WinFsp installed (for FUSE support).
+- **macOS:** macFUSE installed (for FUSE support).
 
 Build the project:
 
-```
-go build ./...
-```
+* **Windows:**
+  ```powershell
+  .\build.ps1
+  ```
+* **macOS/Unix:**
+  ```bash
+  make build
+  ```
 
-Run from source (example):
-
-```
-go run main.go
-```
-
-Run the test suite:
-
-```
-go test ./...
+Run the test suite (macOS/Unix):
+```bash
+make test
 ```
 
 ## Project layout
@@ -208,10 +207,14 @@ All 12 standard FUSE filesystem operations are implemented in `host/bridge.go`:
 
 ### Setup
 
-```powershell
-# Run as Administrator
-werunos install
-```
+* **Windows (Run as Administrator):**
+  ```powershell
+  werunos install
+  ```
+* **macOS (Run with sudo):**
+  ```bash
+  sudo ./werunos install
+  ```
 
 ---
 
@@ -219,37 +222,46 @@ werunos install
 
 ### List available disks
 
-```powershell
-werunos devices
-```
+* **Windows (Administrator powershell):**
+  ```powershell
+  werunos devices
+  ```
+* **macOS (Terminal with sudo):**
+  ```bash
+  sudo ./werunos devices
+  ```
 
-Output:
+Output (macOS example):
 ```
-Found 2 disk(s):
+Found 3 disk(s):
 
-Disk 0: \\.\PhysicalDrive0
+Disk 0: /dev/rdisk0
+  (could not open: open /dev/rdisk0: permission denied)
+
+Disk 1: /dev/rdisk1
   Partition table: GPT
   #    Name                       Type                 Size
   ----  ------------------------  -------------------  -------
-  1     EFI system partition      EFI System           100 MiB
-  2     Microsoft reserved        Microsoft basic data  16 MiB
-  3     Basic data partition      Microsoft basic data  237 GiB
-  4     Linux filesystem          Linux filesystem      256 GiB
+  1     EFI system partition      EFI System           512 MiB
+  2     Linux filesystem          Linux filesystem     120 GiB
 
-Disk 1: \\.\PhysicalDrive1
-  Partition table: GPT
-  #    Name                       Type                 Size
-  ----  ------------------------  -------------------  -------
-  1     Linux filesystem          Linux filesystem      1 TiB
+To mount a partition:
+  sudo werunos mount <dir> <diskNum> <partNum>
+  Example: sudo werunos mount /Volumes/ext4 1 2
 ```
 
 ### List a partition's root directory
 
-```powershell
-werunos \\.\PhysicalDrive1 1
-```
+* **Windows:**
+  ```powershell
+  werunos \\.\PhysicalDrive1 1
+  ```
+* **macOS:**
+  ```bash
+  sudo ./werunos /dev/rdisk1 2
+  ```
 
-### Mount as a drive letter
+### Mount partition
 
 ```powershell
 # Mount a physical disk partition (supports ext4 & btrfs)
@@ -260,21 +272,29 @@ werunos mount E: 1 1    # PhysicalDrive1 partition 1 → E:\
 werunos mount Z: btrfs_test.img
 ```
 
-The mount blocks until Ctrl+C. While mounted, the drive appears in File Explorer
-and is accessible from any Windows application.
+The mount blocks until Ctrl+C. While mounted, the drive appears in File Explorer (Windows) or Finder (macOS) and is fully read-write.
 
-### Filesystem check
+### Filesystem check (fsck)
 
-```powershell
-# Read-only scan
-werunos fsck \\.\PhysicalDrive0 4
+* **Windows:**
+  ```powershell
+  # Read-only scan
+  werunos fsck \\.\PhysicalDrive0 4
 
-# Scan + fix
-werunos fsck --fix \\.\PhysicalDrive0 4
+  # Scan + fix
+  werunos fsck --fix \\.\PhysicalDrive0 4
+  ```
+* **macOS:**
+  ```bash
+  # Read-only scan
+  sudo ./werunos fsck /dev/rdisk1 2
 
-# Scan a raw image
-werunos fsck testfs.img
-```
+  # Scan + fix
+  sudo ./werunos fsck --fix /dev/rdisk1 2
+
+  # Scan a raw image file
+  ./werunos fsck testfs.img
+  ```
 
 Output:
 ```
@@ -299,11 +319,19 @@ No problems found: filesystem is healthy
 
 ## Building
 
-```powershell
-go build -o Werunos.exe .
-```
+* **Windows:**
+  ```powershell
+  go build -o werunos.exe .
+  ```
+  *(Or run `.\build.ps1` to compile using WinFsp headers automatically).*
 
-Requires Go 1.21+. The only external dependency is `github.com/winfsp/cgofuse`.
+* **macOS:**
+  ```bash
+  make build
+  ```
+  *(Or run `go build -o werunos .` directly).*
+
+Requires Go 1.21+. The only external dependency is `github.com/winfsp/cgofuse` which maps to macOS/FUSE structures out of the box when macFUSE is active.
 
 ---
 

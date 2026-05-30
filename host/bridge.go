@@ -25,7 +25,11 @@ func NewOrionFS(filesys fs.FileSystem) *OrionFS {
 }
 
 func (j *OrionFS) Init() {
+<<<<<<< HEAD
 	log.Printf("[FUSE] Init() - filesystem type=%s is live, WinFsp handshake complete", j.inner.Type())
+=======
+	log.Printf("[FUSE] Init() - filesystem is live, FUSE handshake complete")
+>>>>>>> fe95509 (made it compatible with mac)
 }
 
 func (j *OrionFS) Destroy() {
