@@ -22,10 +22,29 @@ func main() {
 	}
 }
 
+func printHelp() {
+	fmt.Print(
+		"Werunos - Userspace Ext4 & Btrfs Driver for Windows\n\n" +
+		"Usage:\n" +
+		"  werunos install                          install WinFsp (requires Admin)\n" +
+		"  werunos devices                          list physical disks\n" +
+		"  werunos fsck [--fix] <device> [<part>]   check/repair ext4 filesystem\n" +
+		"  werunos <device>                         list partitions on device or image\n" +
+		"  werunos <device> <partNum>               read root dir of partition\n" +
+		"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n" +
+		"  werunos -h, --help                       show this help info\n\n" +
+		"Supported Filesystems:\n" +
+		"  ext4, btrfs (both read-write)\n",
+	)
+}
+
 func run() error {
 
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
+		case "-h", "--help", "help", "/?":
+			printHelp()
+			return nil
 		case "devices":
 			return runDevices()
 		case "install":

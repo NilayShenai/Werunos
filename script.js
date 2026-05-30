@@ -52,4 +52,42 @@
     });
   }
 
+  /* ── Cache Busting & Auto Update Check ──────────────────────────── */
+
+  function checkSiteVersion() {
+    var versionMeta = document.querySelector('meta[name="version"]');
+    if (!versionMeta) return;
+    var currentVersion = versionMeta.getAttribute('content');
+
+    // Fetch index.html with a cache-buster query parameter to bypass HTTP caching
+    var cacheBuster = new Date().getTime();
+    var fetchUrl = window.location.origin + window.location.pathname;
+    var urlWithBuster = fetchUrl + (fetchUrl.indexOf('?') >= 0 ? '&' : '?') + '_cb=' + cacheBuster;
+
+    fetch(urlWithBuster, { cache: 'no-store' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to fetch the latest site version');
+        return res.text();
+      })
+      .then(function (html) {
+        // Parse out the version content from the returned HTML body/meta tags
+        var match = html.match(/<meta[^>]+name=["']version["'][^>]+content=["']([^"']+)["']/i) ||
+                    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']version["']/i);
+        if (match && match[1]) {
+          var serverVersion = match[1].trim();
+          if (serverVersion !== currentVersion) {
+            console.log('[Updater] New version detected on server: ' + serverVersion + ' (Local: ' + currentVersion + '). Reloading...');
+            // Perform reload to fetch the latest changes
+            window.location.reload();
+          }
+        }
+      })
+      .catch(function (err) {
+        console.warn('[Updater] Update check failed:', err);
+      });
+  }
+
+  // Check for updates 3 seconds after page load
+  setTimeout(checkSiteVersion, 3000);
+
 })();
