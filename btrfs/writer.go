@@ -29,7 +29,6 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 
 	nritems := int(binary.LittleEndian.Uint32(buf[96:100]))
 
-	// Parse existing items: read key + offset + size from each item record
 	type itemRec struct {
 		key    key
 		offset uint32
@@ -84,23 +83,19 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 		all[i+1] = itemEntry{k: items[i].key, data: items[i].data}
 	}
 
-	// Calculate total data size
 	totalData := 0
 	for _, it := range all {
 		totalData += len(it.data)
 	}
 
-	// Check space: header + items + data must fit in node
 	needed := nodeHeaderSize + len(all)*25 + totalData
 	if needed > bs {
 		return b.splitLeaf(leafLogical, k, all, bs, ins)
 	}
 
-	// Build new leaf
 	dst := make([]byte, bs)
 	copy(dst[:nodeHeaderSize], buf[:nodeHeaderSize])
 
-	// Write data area: fill from the end going backward
 	dataPos := bs
 	for i := len(all) - 1; i >= 0; i-- {
 		sz := len(all[i].data)
@@ -108,7 +103,6 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 		copy(dst[dataPos:dataPos+sz], all[i].data)
 	}
 
-	// Write item records
 	curDataOff := dataPos
 	for i, it := range all {
 		off := nodeHeaderSize + i*25
@@ -388,7 +382,6 @@ func (b *FileSystem) deleteFromLeaf(logicalAddr uint64, k key) error {
 		return fmt.Errorf("btrfs: key not found for deletion: %+v", k)
 	}
 
-	// Rebuild items slice without the deleted item
 	all := make([]itemRec, 0, nritems-1)
 	for i := 0; i < nritems; i++ {
 		if i == deleteIdx {
@@ -397,11 +390,9 @@ func (b *FileSystem) deleteFromLeaf(logicalAddr uint64, k key) error {
 		all = append(all, items[i])
 	}
 
-	// Build new leaf
 	dst := make([]byte, bs)
 	copy(dst[:nodeHeaderSize], buf[:nodeHeaderSize])
 
-	// Write data area: fill from the end going backward
 	dataPos := bs
 	for i := len(all) - 1; i >= 0; i-- {
 		sz := len(all[i].data)
@@ -409,7 +400,6 @@ func (b *FileSystem) deleteFromLeaf(logicalAddr uint64, k key) error {
 		copy(dst[dataPos:dataPos+sz], all[i].data)
 	}
 
-	// Write item records
 	curDataOff := dataPos
 	for i, it := range all {
 		off := nodeHeaderSize + i*25
@@ -490,26 +480,21 @@ func (b *FileSystem) updateInLeaf(logicalAddr uint64, k key, itemData []byte) er
 		return fmt.Errorf("btrfs: key not found for update: %+v", k)
 	}
 
-	// Update the item data
 	items[updateIdx].data = itemData
 
-	// Calculate total data size
 	totalData := 0
 	for _, it := range items {
 		totalData += len(it.data)
 	}
 
-	// Check space
 	needed := nodeHeaderSize + len(items)*25 + totalData
 	if needed > bs {
 		return fmt.Errorf("btrfs: leaf has no space for update (need %d, have %d)", needed, bs)
 	}
 
-	// Build new leaf
 	dst := make([]byte, bs)
 	copy(dst[:nodeHeaderSize], buf[:nodeHeaderSize])
 
-	// Write data area: fill from the end going backward
 	dataPos := bs
 	for i := len(items) - 1; i >= 0; i-- {
 		sz := len(items[i].data)
@@ -517,7 +502,6 @@ func (b *FileSystem) updateInLeaf(logicalAddr uint64, k key, itemData []byte) er
 		copy(dst[dataPos:dataPos+sz], items[i].data)
 	}
 
-	// Write item records
 	curDataOff := dataPos
 	for i, it := range items {
 		off := nodeHeaderSize + i*25
@@ -791,4 +775,3 @@ func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs in
 
 	return fmt.Errorf("btrfs: leaf has no space (need %d, have %d) and split not supported above level 0", nodeHeaderSize+len(all)*25, bs)
 }
-

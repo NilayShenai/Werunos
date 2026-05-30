@@ -57,14 +57,14 @@ func (tc *treeContext) parseChunkItem(item leafItem, data []byte) error {
 	}
 	r := &byteReader{buf: data}
 	length := r.u64()
-	_ = r.u64() // owner
-	_ = r.u64() // stripe_len
-	flags := r.u64() // type (flags)
-	_ = r.u32() // io_align
-	_ = r.u32() // io_width
-	_ = r.u32() // sector_size
+	_ = r.u64()
+	_ = r.u64()
+	flags := r.u64()
+	_ = r.u32()
+	_ = r.u32()
+	_ = r.u32()
 	numStripes := r.u16()
-	_ = r.u16() // sub_stripes
+	_ = r.u16()
 
 	logical := item.key.offset
 
@@ -73,7 +73,7 @@ func (tc *treeContext) parseChunkItem(item leafItem, data []byte) error {
 	}
 
 	r.skip(int(numStripes-1) * 32)
-	_ = r.u64() // device_id of last stripe
+	_ = r.u64()
 	physOffset := r.u64()
 
 	tc.addChunk(logical, length, physOffset, flags)

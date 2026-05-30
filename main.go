@@ -25,16 +25,16 @@ func main() {
 func printHelp() {
 	fmt.Print(
 		"Werunos - Userspace Ext4 & Btrfs Driver for Windows\n\n" +
-		"Usage:\n" +
-		"  werunos install                          install WinFsp (requires Admin)\n" +
-		"  werunos devices                          list physical disks\n" +
-		"  werunos fsck [--fix] <device> [<part>]   check/repair ext4 filesystem\n" +
-		"  werunos <device>                         list partitions on device or image\n" +
-		"  werunos <device> <partNum>               read root dir of partition\n" +
-		"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n" +
-		"  werunos -h, --help                       show this help info\n\n" +
-		"Supported Filesystems:\n" +
-		"  ext4, btrfs (both read-write)\n",
+			"Usage:\n" +
+			"  werunos install                          install WinFsp (requires Admin)\n" +
+			"  werunos devices                          list physical disks\n" +
+			"  werunos fsck [--fix] <device> [<part>]   check/repair ext4 filesystem\n" +
+			"  werunos <device>                         list partitions on device or image\n" +
+			"  werunos <device> <partNum>               read root dir of partition\n" +
+			"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n" +
+			"  werunos -h, --help                       show this help info\n\n" +
+			"Supported Filesystems:\n" +
+			"  ext4, btrfs (both read-write)\n",
 	)
 }
 
@@ -95,7 +95,7 @@ func run() error {
 				"  werunos fsck [--fix] <device> [<part>]   check/repair ext4 filesystem\n" +
 				"  werunos <device>                         list partitions on device\n" +
 				"  werunos <device> <partNum>               read root dir of partition\n" +
-				"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n"+
+				"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n" +
 				"  (supports ext4 and btrfs filesystems)\n",
 		)
 	}
@@ -188,8 +188,8 @@ func runMount() error {
 	args := os.Args
 	if len(args) < 4 || len(args) > 5 {
 		return fmt.Errorf(
-			"usage: werunos mount <letter> <diskNum|imagePath> [<partNum>]\n"+
-				"  example: werunos mount G: 0 1              (physical disk partition)\n"+
+			"usage: werunos mount <letter> <diskNum|imagePath> [<partNum>]\n" +
+				"  example: werunos mount G: 0 1              (physical disk partition)\n" +
 				"  example: werunos mount G: testfs.img       (raw ext4/btrfs image file)\n",
 		)
 	}

@@ -162,7 +162,6 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 		return 0, err
 	}
 
-	// 1. Read existing extent data if it exists
 	var extData []byte
 	var foundExtKey key
 	b.walkFSTree(func(item leafItem, d []byte) error {
@@ -182,12 +181,12 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 		extType := extData[20]
 		if extType == BTRFS_FILE_EXTENT_INLINE {
 			r := &byteReader{buf: extData}
-			r.skip(8) // generation
-			ramBytes := r.u64() // size
+			r.skip(8)
+			ramBytes := r.u64()
 			ctype := r.u8()
-			r.skip(1) // encryption
-			r.skip(2) // other
-			r.skip(1) // extType
+			r.skip(1)
+			r.skip(2)
+			r.skip(1)
 			raw := extData[r.off:]
 			if ctype != BTRFS_COMPRESS_NONE {
 				dec, err := decompressData(ctype, raw, ramBytes)
@@ -211,7 +210,6 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 		}
 	}
 
-	// 2. Merge new buf at ofst
 	newSize := uint64(ofst) + uint64(len(buf))
 	finalContent := make([]byte, newSize)
 	if len(currentContent) > 0 {
@@ -219,7 +217,6 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 	}
 	copy(finalContent[ofst:], buf)
 
-	// 3. Choose Inline vs Regular Extent based on size
 	if newSize <= 2048 {
 		newExtItem := makeExtentDataInline(0, finalContent)
 		if len(extData) > 0 {
@@ -236,7 +233,7 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 			}
 		}
 	} else {
-		// Regular Extent Path (>2KB)
+
 		logicalAddr, physAddr, err := b.allocateSpace(newSize, BTRFS_BLOCK_GROUP_DATA)
 		if err != nil {
 			return 0, err
@@ -257,7 +254,6 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 
 		_ = b.registerExtent(logicalAddr, alignedSize)
 
-		// Delete existing extents to prevent duplicates/corruptions
 		var keysToDelete []key
 		b.walkFSTree(func(item leafItem, d []byte) error {
 			if item.key.objectid == inodeNum && item.key.typ == BTRFS_EXTENT_DATA_KEY {
@@ -269,7 +265,6 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 			_ = b.deleteFromLeaf(b.fsRoot, k)
 		}
 
-		// Insert the new regular extent metadata item
 		newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, newSize)
 		if err := b.insertIntoLeaf(b.fsRoot, key{
 			objectid: inodeNum,
@@ -280,7 +275,6 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 		}
 	}
 
-	// 4. Update inode size in the FS tree
 	var inodeData []byte
 	b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == inodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -295,9 +289,9 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 			binary.LittleEndian.PutUint64(inodeData[16:24], newSize)
 		}
 		now := uint64(time.Now().Unix())
-		binary.LittleEndian.PutUint64(inodeData[120:128], now) // ctime
+		binary.LittleEndian.PutUint64(inodeData[120:128], now)
 		binary.LittleEndian.PutUint32(inodeData[128:132], 0)
-		binary.LittleEndian.PutUint64(inodeData[132:140], now) // mtime
+		binary.LittleEndian.PutUint64(inodeData[132:140], now)
 		binary.LittleEndian.PutUint32(inodeData[140:144], 0)
 		b.updateInLeaf(b.fsRoot, key{
 			objectid: inodeNum,
@@ -314,13 +308,13 @@ func (b *FileSystem) makeExtentDataRegular(logicalAddr uint64, diskSize uint64, 
 	buf := make([]byte, 53)
 	binary.LittleEndian.PutUint64(buf[0:8], b.sb.Generation)
 	binary.LittleEndian.PutUint64(buf[8:16], ramSize)
-	buf[16] = 0 // compression = none
-	buf[17] = 0 // encryption = none
+	buf[16] = 0
+	buf[17] = 0
 	binary.LittleEndian.PutUint16(buf[18:20], 0)
 	buf[20] = BTRFS_FILE_EXTENT_REG
 	binary.LittleEndian.PutUint64(buf[21:29], logicalAddr)
 	binary.LittleEndian.PutUint64(buf[29:37], diskSize)
-	binary.LittleEndian.PutUint64(buf[37:45], 0) // offset
+	binary.LittleEndian.PutUint64(buf[37:45], 0)
 	binary.LittleEndian.PutUint64(buf[45:53], ramSize)
 	return buf
 }
@@ -359,7 +353,6 @@ func (b *FileSystem) removeEntry(path string, mustBeDir bool) error {
 		return err
 	}
 
-	// Verify child node attributes
 	childInfo, err := b.readInodeInfo(childInodeNum)
 	if err != nil {
 		return err
@@ -382,12 +375,10 @@ func (b *FileSystem) removeEntry(path string, mustBeDir bool) error {
 		}
 	}
 
-	// Delete the DIR_INDEX entry from parent leaf
 	if err := b.deleteFromLeaf(b.fsRoot, entryKey); err != nil {
 		return err
 	}
 
-	// Read child inode
 	var inodeData []byte
 	err = b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == childInodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -412,7 +403,7 @@ func (b *FileSystem) removeEntry(path string, mustBeDir bool) error {
 		binary.LittleEndian.PutUint32(inodeData[128:132], 0)
 
 		if nlink == 0 {
-			// Delete child inode
+
 			if err := b.deleteFromLeaf(b.fsRoot, key{
 				objectid: childInodeNum,
 				typ:      BTRFS_INODE_ITEM_KEY,
@@ -421,7 +412,6 @@ func (b *FileSystem) removeEntry(path string, mustBeDir bool) error {
 				return err
 			}
 
-			// Delete any extent data blocks for the child
 			var extentKeys []key
 			b.walkFSTree(func(item leafItem, d []byte) error {
 				if item.key.objectid == childInodeNum && item.key.typ == BTRFS_EXTENT_DATA_KEY {
@@ -433,7 +423,7 @@ func (b *FileSystem) removeEntry(path string, mustBeDir bool) error {
 				b.deleteFromLeaf(b.fsRoot, ek)
 			}
 		} else {
-			// Update child inode nlink
+
 			if err := b.updateInLeaf(b.fsRoot, key{
 				objectid: childInodeNum,
 				typ:      BTRFS_INODE_ITEM_KEY,
@@ -476,7 +466,6 @@ func (b *FileSystem) Rename(oldpath, newpath string) error {
 		return err
 	}
 
-	// Read child inode info to find its file type
 	childInfo, err := b.readInodeInfo(childInodeNum)
 	if err != nil {
 		return err
@@ -488,13 +477,12 @@ func (b *FileSystem) Rename(oldpath, newpath string) error {
 		fileType = BTRFS_FT_SYMLINK
 	}
 
-	// Check if target already exists
 	if targetKey, targetInode, err := b.lookupDirEntryKey(newDirInode, newName); err == nil {
-		// Delete target first
+
 		if err := b.deleteFromLeaf(b.fsRoot, targetKey); err != nil {
 			return err
 		}
-		// Dec target nlink
+
 		var targetData []byte
 		b.walkFSTree(func(item leafItem, d []byte) error {
 			if item.key.objectid == targetInode && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -511,7 +499,7 @@ func (b *FileSystem) Rename(oldpath, newpath string) error {
 			binary.LittleEndian.PutUint32(targetData[40:44], nlink)
 			if nlink == 0 {
 				b.deleteFromLeaf(b.fsRoot, key{objectid: targetInode, typ: BTRFS_INODE_ITEM_KEY, offset: 0})
-				// delete extents
+
 				var extentKeys []key
 				b.walkFSTree(func(item leafItem, d []byte) error {
 					if item.key.objectid == targetInode && item.key.typ == BTRFS_EXTENT_DATA_KEY {
@@ -528,12 +516,10 @@ func (b *FileSystem) Rename(oldpath, newpath string) error {
 		}
 	}
 
-	// Delete old entry
 	if err := b.deleteFromLeaf(b.fsRoot, entryKey); err != nil {
 		return err
 	}
 
-	// Insert new entry
 	nextOff := b.nextDirIndex(newDirInode)
 	dirData := makeDirItem(childInodeNum, newName, fileType)
 	if err := b.insertIntoLeaf(b.fsRoot, key{
@@ -544,7 +530,6 @@ func (b *FileSystem) Rename(oldpath, newpath string) error {
 		return err
 	}
 
-	// Update times on oldDirInode and newDirInode
 	now := uint64(time.Now().Unix())
 	for _, dirNode := range []uint64{oldDirInode, newDirInode} {
 		var dData []byte
@@ -578,8 +563,7 @@ func (b *FileSystem) Chmod(path string, mode uint32) error {
 	if err != nil {
 		return err
 	}
-	
-	// Read existing inode data
+
 	var data []byte
 	err = b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == inodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -596,15 +580,12 @@ func (b *FileSystem) Chmod(path string, mode uint32) error {
 		return fmt.Errorf("btrfs: inode %d not found or invalid", inodeNum)
 	}
 
-	// Update mode (offset 52)
-	binary.LittleEndian.PutUint32(data[52:56], (binary.LittleEndian.Uint32(data[52:56]) & 0xFFFF0000) | (mode & 0x0FFF))
-	
-	// Update ctime (offset 120)
+	binary.LittleEndian.PutUint32(data[52:56], (binary.LittleEndian.Uint32(data[52:56])&0xFFFF0000)|(mode&0x0FFF))
+
 	now := uint64(time.Now().Unix())
 	binary.LittleEndian.PutUint64(data[120:128], now)
 	binary.LittleEndian.PutUint32(data[128:132], 0)
 
-	// Persist
 	return b.updateInLeaf(b.fsRoot, key{
 		objectid: inodeNum,
 		typ:      BTRFS_INODE_ITEM_KEY,
@@ -619,8 +600,7 @@ func (b *FileSystem) Chown(path string, uid, gid uint32) error {
 	if err != nil {
 		return err
 	}
-	
-	// Read existing inode data
+
 	var data []byte
 	err = b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == inodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -637,20 +617,17 @@ func (b *FileSystem) Chown(path string, uid, gid uint32) error {
 		return fmt.Errorf("btrfs: inode %d not found or invalid", inodeNum)
 	}
 
-	// Update uid (offset 44) and gid (offset 48)
 	if uid != ^uint32(0) {
 		binary.LittleEndian.PutUint32(data[44:48], uid)
 	}
 	if gid != ^uint32(0) {
 		binary.LittleEndian.PutUint32(data[48:52], gid)
 	}
-	
-	// Update ctime (offset 120)
+
 	now := uint64(time.Now().Unix())
 	binary.LittleEndian.PutUint64(data[120:128], now)
 	binary.LittleEndian.PutUint32(data[128:132], 0)
 
-	// Persist
 	return b.updateInLeaf(b.fsRoot, key{
 		objectid: inodeNum,
 		typ:      BTRFS_INODE_ITEM_KEY,
@@ -665,8 +642,7 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 	if err != nil {
 		return err
 	}
-	
-	// Read existing inode data
+
 	var data []byte
 	err = b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == inodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -683,10 +659,8 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 		return fmt.Errorf("btrfs: inode %d not found or invalid", inodeNum)
 	}
 
-	// Update size (offset 16)
 	binary.LittleEndian.PutUint64(data[16:24], uint64(size))
-	
-	// Update ctime and mtime
+
 	now := uint64(time.Now().Unix())
 	binary.LittleEndian.PutUint64(data[120:128], now)
 	binary.LittleEndian.PutUint32(data[128:132], 0)
@@ -701,7 +675,6 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 		return err
 	}
 
-	// If size is truncated to 0, we can delete the existing inline/regular extent items
 	if size == 0 {
 		var extentKeys []key
 		b.walkFSTree(func(item leafItem, d []byte) error {
@@ -716,7 +689,7 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 			}
 		}
 	} else {
-		// If size is non-zero, let's find the extent and resize it!
+
 		var extKey key
 		var extData []byte
 		b.walkFSTree(func(item leafItem, d []byte) error {
@@ -731,47 +704,47 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 			extType := extData[20]
 			if extType == BTRFS_FILE_EXTENT_INLINE {
 				if size <= 2048 {
-					// Traditional inline resize
+
 					header := make([]byte, 21)
 					copy(header, extData[:21])
-					
+
 					oldInlineData := extData[21:]
 					newInlineData := make([]byte, size)
 					copy(newInlineData, oldInlineData)
-					
+
 					binary.LittleEndian.PutUint64(header[8:16], uint64(size))
 					newExtData := append(header, newInlineData...)
-					
+
 					if err := b.updateInLeaf(b.fsRoot, extKey, newExtData); err != nil {
 						return err
 					}
 				} else {
-					// Growing beyond 2KB: convert to regular extent!
+
 					oldInlineData := extData[21:]
 					newContent := make([]byte, size)
 					copy(newContent, oldInlineData)
-					
+
 					logicalAddr, physAddr, err := b.allocateSpace(uint64(size), BTRFS_BLOCK_GROUP_DATA)
 					if err != nil {
 						return err
 					}
-					
+
 					sectorSize := uint64(b.sb.SectorSize)
 					if sectorSize == 0 {
 						sectorSize = 4096
 					}
 					alignedSize := ((uint64(size) + sectorSize - 1) / sectorSize) * sectorSize
-					
+
 					diskBuf := make([]byte, alignedSize)
 					copy(diskBuf, newContent)
-					
+
 					if _, err := b.dev.WriteAt(diskBuf, int64(physAddr)); err != nil {
 						return err
 					}
-					
+
 					_ = b.registerExtent(logicalAddr, alignedSize)
 					_ = b.deleteFromLeaf(b.fsRoot, extKey)
-					
+
 					newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, uint64(size))
 					if err := b.insertIntoLeaf(b.fsRoot, key{
 						objectid: inodeNum,
@@ -782,10 +755,10 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 					}
 				}
 			} else if extType == BTRFS_FILE_EXTENT_REG {
-				// Regular extent resize
+
 				diskBytenr := binary.LittleEndian.Uint64(extData[21:29])
 				numBytes := binary.LittleEndian.Uint64(extData[45:53])
-				
+
 				var oldContent []byte
 				if diskBytenr > 0 && numBytes > 0 {
 					phys, err := b.tc.resolve(diskBytenr)
@@ -794,33 +767,33 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 						_, _ = b.dev.ReadAt(oldContent, int64(phys))
 					}
 				}
-				
+
 				newContent := make([]byte, size)
 				if len(oldContent) > 0 {
 					copy(newContent, oldContent)
 				}
-				
+
 				logicalAddr, physAddr, err := b.allocateSpace(uint64(size), BTRFS_BLOCK_GROUP_DATA)
 				if err != nil {
 					return err
 				}
-				
+
 				sectorSize := uint64(b.sb.SectorSize)
 				if sectorSize == 0 {
 					sectorSize = 4096
 				}
 				alignedSize := ((uint64(size) + sectorSize - 1) / sectorSize) * sectorSize
-				
+
 				diskBuf := make([]byte, alignedSize)
 				copy(diskBuf, newContent)
-				
+
 				if _, err := b.dev.WriteAt(diskBuf, int64(physAddr)); err != nil {
 					return err
 				}
-				
+
 				_ = b.registerExtent(logicalAddr, alignedSize)
 				_ = b.deleteFromLeaf(b.fsRoot, extKey)
-				
+
 				newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, uint64(size))
 				if err := b.insertIntoLeaf(b.fsRoot, key{
 					objectid: inodeNum,
@@ -832,7 +805,7 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 			}
 		}
 	}
-	
+
 	b.pathCache.Delete(path)
 	return nil
 }
@@ -860,12 +833,10 @@ func (b *FileSystem) Symlink(target, newpath string) error {
 	})
 	newInode := maxInode + 1
 
-	// Inode mode for symlink is 0xA000 | 0777
 	if err := b.insertInodeItem(newInode, 0xA000|0777); err != nil {
 		return err
 	}
 
-	// Set the inode size to the length of the symlink target
 	var inodeData []byte
 	err = b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == newInode && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -883,7 +854,6 @@ func (b *FileSystem) Symlink(target, newpath string) error {
 		return err
 	}
 
-	// Insert the symlink target as an inline file extent
 	extData := makeExtentDataInline(0, []byte(target))
 	if err := b.insertIntoLeaf(b.fsRoot, key{
 		objectid: newInode,
@@ -893,7 +863,6 @@ func (b *FileSystem) Symlink(target, newpath string) error {
 		return err
 	}
 
-	// Insert directory entry into parent
 	if _, err := b.lookupDirEntry(dirInode, name); err == nil {
 		return fmt.Errorf("btrfs: entry already exists: %s", name)
 	}
@@ -948,7 +917,6 @@ func (b *FileSystem) Link(oldpath, newpath string) error {
 		return fmt.Errorf("btrfs: entry already exists: %s", name)
 	}
 
-	// Increment oldInode's nlink
 	var inodeData []byte
 	err = b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == oldInodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -972,7 +940,6 @@ func (b *FileSystem) Link(oldpath, newpath string) error {
 		return err
 	}
 
-	// Insert directory entry into parent
 	nextOff := b.nextDirIndex(dirInode)
 	dirData := makeDirItem(oldInodeNum, name, fileType)
 	if err := b.insertIntoLeaf(b.fsRoot, key{
@@ -1029,8 +996,6 @@ func (b *FileSystem) lookupDirEntryKey(dirInode uint64, name string) (key, uint6
 	}
 	return key{}, 0, fs.ErrNotExist
 }
-
-
 
 func (b *FileSystem) Superblock() (any, error) {
 	return b.sb, nil
@@ -1462,7 +1427,7 @@ func (b *FileSystem) walkFSTree(cb func(leafItem, []byte) error) error {
 
 func (b *FileSystem) findExtentTreeRoot() (rootAddr uint64, rootLvl uint8, err error) {
 	err = b.tc.walkTree(b.sb.Root, b.sb.RootLevel, func(item leafItem, data []byte) error {
-		if item.key.typ == BTRFS_ROOT_ITEM_KEY && item.key.objectid == 2 { // BTRFS_EXTENT_TREE_OBJECTID
+		if item.key.typ == BTRFS_ROOT_ITEM_KEY && item.key.objectid == 2 {
 			if len(data) < 240 {
 				return nil
 			}
@@ -1498,5 +1463,3 @@ func (b *FileSystem) walkExtentTree(cb func(leafItem, []byte) error) error {
 	}
 	return b.tc.walkTree(b.extentRoot, b.extentRootLvl, cb)
 }
-
-

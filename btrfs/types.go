@@ -59,19 +59,19 @@ const (
 	superblockOffset = 0x10000
 	superblockSize   = 4096
 
-	BTRFS_ROOT_ITEM_KEY    = 132
-	BTRFS_DIR_ITEM_KEY     = 84
-	BTRFS_DIR_INDEX_KEY    = 96
-	BTRFS_INODE_ITEM_KEY   = 1
-	BTRFS_INODE_REF_KEY    = 12
-	BTRFS_EXTENT_DATA_KEY  = 108
-	BTRFS_CHUNK_ITEM_KEY   = 228
-	BTRFS_ROOT_BACKREF_KEY = 144
-	BTRFS_EXTENT_ITEM_KEY  = 168
+	BTRFS_ROOT_ITEM_KEY        = 132
+	BTRFS_DIR_ITEM_KEY         = 84
+	BTRFS_DIR_INDEX_KEY        = 96
+	BTRFS_INODE_ITEM_KEY       = 1
+	BTRFS_INODE_REF_KEY        = 12
+	BTRFS_EXTENT_DATA_KEY      = 108
+	BTRFS_CHUNK_ITEM_KEY       = 228
+	BTRFS_ROOT_BACKREF_KEY     = 144
+	BTRFS_EXTENT_ITEM_KEY      = 168
 	BTRFS_BLOCK_GROUP_ITEM_KEY = 192
 
-	BTRFS_FILE_EXTENT_INLINE  = 0
-	BTRFS_FILE_EXTENT_REG     = 1
+	BTRFS_FILE_EXTENT_INLINE   = 0
+	BTRFS_FILE_EXTENT_REG      = 1
 	BTRFS_FILE_EXTENT_PREALLOC = 2
 
 	BTRFS_BLOCK_GROUP_DATA     = 1
@@ -109,15 +109,15 @@ func decodeKey(r *byteReader) key {
 }
 
 type nodeHeader struct {
-	csum      [32]byte
-	fsid      [16]byte
-	bytenr    uint64
-	flags     uint64
-	chunkUuid [16]byte
+	csum       [32]byte
+	fsid       [16]byte
+	bytenr     uint64
+	flags      uint64
+	chunkUuid  [16]byte
 	generation uint64
-	owner     uint64
-	nritems   uint32
-	level     uint8
+	owner      uint64
+	nritems    uint32
+	level      uint8
 }
 
 func decodeNodeHeader(r *byteReader) nodeHeader {
