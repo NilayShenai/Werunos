@@ -345,44 +345,79 @@ func runFsckPartition(devicePath string, partNum int, fix bool) error {
 }
 
 func runFsckDevice(dev block.ReadWriterAt, fix bool) error {
-	fs, err := vfs.NewFileSystem(dev)
+	filesys, err := openFilesystem(dev)
 	if err != nil {
-		return fmt.Errorf("failed to init filesystem: %w", err)
+		return fmt.Errorf("failed to detect filesystem for fsck: %w", err)
 	}
 
-	if _, err := fs.ReadSuperBlock(); err != nil {
-		return fmt.Errorf("failed to read superblock: %w", err)
-	}
+	if filesys.Type() == "ext4" {
+		fs, err := vfs.NewFileSystem(dev)
+		if err != nil {
+			return fmt.Errorf("failed to init filesystem: %w", err)
+		}
 
-	sb, err := fs.Superblock()
-	if err != nil {
-		return fmt.Errorf("superblock not available: %w", err)
-	}
-	fmt.Printf("Volume: %s\n", strings.Trim(string(sb.S_volume_name[:]), "\x00"))
-	fmt.Printf("Block size: %d\n", fs.BlockSize)
-	fmt.Printf("Inodes: %d\n", sb.S_inodes_count)
-	fmt.Printf("Blocks: %d\n", sb.S_blocks_count_lo)
-	fmt.Printf("Block groups: %d\n", fs.GroupCount)
-	fmt.Println()
+		if _, err := fs.ReadSuperBlock(); err != nil {
+			return fmt.Errorf("failed to read superblock: %w", err)
+		}
 
-	if err := fs.ReadGroupDescriptors(); err != nil {
-		return fmt.Errorf("failed to read group descriptors: %w", err)
-	}
-
-	if fix {
-		fmt.Println("Repair mode enabled (--fix)")
+		sb, err := fs.Superblock()
+		if err != nil {
+			return fmt.Errorf("superblock not available: %w", err)
+		}
+		fmt.Printf("Detected filesystem: ext4\n")
+		fmt.Printf("Volume: %s\n", strings.Trim(string(sb.S_volume_name[:]), "\x00"))
+		fmt.Printf("Block size: %d\n", fs.BlockSize)
+		fmt.Printf("Inodes: %d\n", sb.S_inodes_count)
+		fmt.Printf("Blocks: %d\n", sb.S_blocks_count_lo)
+		fmt.Printf("Block groups: %d\n", fs.GroupCount)
 		fmt.Println()
+
+		if err := fs.ReadGroupDescriptors(); err != nil {
+			return fmt.Errorf("failed to read group descriptors: %w", err)
+		}
+
+		if fix {
+			fmt.Println("Repair mode enabled (--fix)")
+			fmt.Println()
+		}
+
+		fmt.Println("Running integrity check...")
+		res := fs.Fsck(fix)
+		fmt.Println()
+		fmt.Print(res.String())
+
+		if !res.Healthy {
+			return fmt.Errorf("filesystem has errors")
+		}
+		return nil
+	} else if filesys.Type() == "btrfs" {
+		btrfsfs, ok := filesys.(*btrfs.FileSystem)
+		if !ok {
+			return fmt.Errorf("internal error: expected btrfs filesystem")
+		}
+
+		fmt.Printf("Detected filesystem: btrfs\n")
+		fmt.Printf("Node size:    %d\n", btrfsfs.BlockSize())
+		fmt.Println()
+
+		if fix {
+			fmt.Println("Repair mode enabled (--fix)")
+			fmt.Println("Note: Btrfs auto-repair is currently not supported.")
+			fmt.Println()
+		}
+
+		fmt.Println("Running integrity check...")
+		res := btrfsfs.Fsck()
+		fmt.Println()
+		fmt.Print(res.String())
+
+		if !res.Healthy {
+			return fmt.Errorf("filesystem has errors")
+		}
+		return nil
 	}
 
-	fmt.Println("Running integrity check...")
-	res := fs.Fsck(fix)
-	fmt.Println()
-	fmt.Print(res.String())
-
-	if !res.Healthy {
-		return fmt.Errorf("filesystem has errors")
-	}
-	return nil
+	return fmt.Errorf("unsupported filesystem for fsck: %s", filesys.Type())
 }
 
 func runImageMode() error {

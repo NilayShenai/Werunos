@@ -49,13 +49,13 @@ If you have ever needed to access a Linux drive from Windows without booting a f
 | **Symlinks** | Yes | Yes | Fast/slow inode data pathways (ext4), and transparent inline symlink extent writing (btrfs) |
 | **Hard links** | Yes | Yes | Reference counts (`nlink`) dynamically updated; blocks directory linking for POSIX compliance |
 | **chmod / chown** | Yes | Yes | Directly mutates permission modes, UIDs, and GIDs, recalculating metadata CRCs / checksums |
-| **Compression** | No | Yes | `compress.go` (btrfs): Transparent segmented frame decompression of **zlib** and **LZO** extents |
+| **Compression** | No | Yes | `compress.go` (btrfs): Transparent frame decompression (**zlib**, **LZO**, **ZSTD**) and dynamic Zlib write compression |
 
 ### Crash safety
 
 | Protection | Implementation |
 |---|---|
-| Redo log | `redolog.go`: pre-read + log + fsync + write + truncate |
+| Redo log | `redolog.go`: pre-read (with thread-safe 64-slot LRU block cache) + log + fsync + write + truncate |
 | jbd2 replay | `jbd2.go`: circular buffer walk, tag parse, escape deobfuscation |
 | Orphan cleanup | `jbd2.go`: `S_last_orphan` list traversal, block + inode free |
 | State auto-clear | `reclaim.go`: `ClearSuperblockErrors()` sets `S_state = CLEAN` |
@@ -65,14 +65,10 @@ If you have ever needed to access a Linux drive from Windows without booting a f
 
 ### Filesystem health
 
-| Command | Phase | What it checks |
+| Command | Filesystem | Scope / What it checks |
 |---|---|---|
-| `Werunos fsck` | 1 | Block bitmap vs `BG_free_blocks_count` for every group |
-| `Werunos fsck` | 2 | Inode bitmap vs `BG_free_inodes_count` for every group |
-| `Werunos fsck` | 3 | Every inode: type, extent tree, bounds, block count |
-| `Werunos fsck` | 4 | Superblock free counts vs sum of group descriptors |
-| `Werunos fsck` | 5 | Directory structure: `.`/`..`, duplicates, inode bounds |
-| `--fix` | any | Auto-corrects mismatched counts (block, inode, superblock) |
+| `werunos fsck` | Ext4 | 5-phase validation: block/inode bitmaps, inode sizes, directory structures (`.`/`..`), and metadata/free-block balance. Auto-corrects mismatch states if `--fix` is passed. |
+| `werunos fsck` | Btrfs | Systematically validates superblock fields, chunk logical-to-physical stripe mapping trees, and recursively checks CRC32c signatures and key index order. |
 
 ### Ext4 structures
 
@@ -361,7 +357,7 @@ While WSL2's `wsl --mount` works, it requires you to have WSL2 fully installed, 
 
 For Ext4: legacy indirect blocks, inline data, encryption, and extended attributes >1 block.
 For Btrfs: legacy transaction-based copy-on-write commits and metadata/data splits (mitigated/protected by our unified block-level SafeDevice transaction redo log).
-All common layout structures (ext4 extents, flex_bg, 64bit, HTree directories, btrfs system chunk tables, logical stripe chunk maps, leaf items, zlib/LZO segment frames) are fully supported.
+All common layout structures (ext4 extents, flex_bg, 64bit, HTree directories, btrfs system chunk tables, logical stripe chunk maps, leaf items, zlib/LZO/ZSTD segment frames) are fully supported.
 
 ---
 
@@ -370,10 +366,8 @@ All common layout structures (ext4 extents, flex_bg, 64bit, HTree directories, b
 Werunos aims to expand userspace driver coverage and enhance transactional safety. The roadmap includes:
 
 - **Copy-on-Write (CoW) transactions (Btrfs)**: Transition from in-place leaf mutations to standard CoW tree modifications with transaction commits to ensure crash safety.
-- **Unified FSCK validation (Btrfs)**: Extend the CLI `fsck` command to systematically check Btrfs logical-to-physical stripe groupings, tree generation counts, and CRC32c leaf signatures.
 - **Multi-depth extent B-trees (Ext4)**: Support index block splits and rotations to allow extending files with more than 4 non-contiguous extents.
 - **JBD2 transaction pipeline (Ext4)**: Implement full circular log transaction submissions to replace the temp redo log with native ext4 journal recoveries.
-- **ZSTD decompression (Btrfs)**: Add transparent decoding support for ZSTD compressed Btrfs extents (currently bypassed).
 
 ---
 

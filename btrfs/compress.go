@@ -5,6 +5,8 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const (
@@ -121,25 +123,35 @@ func lzo1xDecompress(src []byte) ([]byte, error) {
 }
 
 func decompressZstd(data []byte, uncompressedLen uint64) ([]byte, error) {
-	out := make([]byte, uncompressedLen)
-	pos := 0
-	dpos := 0
-	for pos < len(data) && dpos < int(uncompressedLen) {
-		if pos+4 > len(data) {
-			break
-		}
-		segLen := int(uint32(data[pos]) | uint32(data[pos+1])<<8 |
-			uint32(data[pos+2])<<16 | uint32(data[pos+3])<<24)
-		pos += 4
-		if segLen == 0 || pos+segLen > len(data) {
-			break
-		}
-		copy(out[dpos:], data[pos:pos+segLen])
-		dpos += segLen
-		pos += segLen
+	dec, err := zstd.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("btrfs: zstd init: %w", err)
 	}
-	if dpos < int(uncompressedLen) {
-		return out[:dpos], nil
+	defer dec.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, dec); err != nil {
+		return nil, fmt.Errorf("btrfs: zstd decompress: %w", err)
 	}
-	return out, nil
+
+	decoded := buf.Bytes()
+	if uint64(len(decoded)) < uncompressedLen {
+		padding := make([]byte, uncompressedLen-uint64(len(decoded)))
+		decoded = append(decoded, padding...)
+	} else if uint64(len(decoded)) > uncompressedLen {
+		decoded = decoded[:uncompressedLen]
+	}
+	return decoded, nil
+}
+
+func compressZlib(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := zlib.NewWriter(&buf)
+	if _, err := w.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

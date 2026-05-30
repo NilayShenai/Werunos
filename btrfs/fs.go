@@ -233,20 +233,34 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 			}
 		}
 	} else {
-
-		logicalAddr, physAddr, err := b.allocateSpace(newSize, BTRFS_BLOCK_GROUP_DATA)
-		if err != nil {
-			return 0, err
-		}
-
 		sectorSize := uint64(b.sb.SectorSize)
 		if sectorSize == 0 {
 			sectorSize = 4096
 		}
-		alignedSize := ((newSize + sectorSize - 1) / sectorSize) * sectorSize
+
+		var payload []byte
+		var compression uint8
+		var writeSize uint64
+
+		if compressed, cerr := compressZlib(finalContent); cerr == nil && len(compressed) < len(finalContent) {
+			payload = compressed
+			compression = BTRFS_COMPRESS_ZLIB
+			writeSize = uint64(len(compressed))
+		} else {
+			payload = finalContent
+			compression = BTRFS_COMPRESS_NONE
+			writeSize = newSize
+		}
+
+		alignedSize := ((writeSize + sectorSize - 1) / sectorSize) * sectorSize
+
+		logicalAddr, physAddr, err := b.allocateSpace(alignedSize, BTRFS_BLOCK_GROUP_DATA)
+		if err != nil {
+			return 0, err
+		}
 
 		diskBuf := make([]byte, alignedSize)
-		copy(diskBuf, finalContent)
+		copy(diskBuf, payload)
 
 		if _, err := b.dev.WriteAt(diskBuf, int64(physAddr)); err != nil {
 			return 0, fmt.Errorf("btrfs: write regular extent: %w", err)
@@ -265,7 +279,7 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 			_ = b.deleteFromLeaf(b.fsRoot, k)
 		}
 
-		newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, newSize)
+		newExtItem := b.makeExtentDataRegularCompressed(logicalAddr, alignedSize, newSize, compression)
 		if err := b.insertIntoLeaf(b.fsRoot, key{
 			objectid: inodeNum,
 			typ:      BTRFS_EXTENT_DATA_KEY,
@@ -305,10 +319,14 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 }
 
 func (b *FileSystem) makeExtentDataRegular(logicalAddr uint64, diskSize uint64, ramSize uint64) []byte {
+	return b.makeExtentDataRegularCompressed(logicalAddr, diskSize, ramSize, BTRFS_COMPRESS_NONE)
+}
+
+func (b *FileSystem) makeExtentDataRegularCompressed(logicalAddr uint64, diskSize uint64, ramSize uint64, compression uint8) []byte {
 	buf := make([]byte, 53)
 	binary.LittleEndian.PutUint64(buf[0:8], b.sb.Generation)
 	binary.LittleEndian.PutUint64(buf[8:16], ramSize)
-	buf[16] = 0
+	buf[16] = compression
 	buf[17] = 0
 	binary.LittleEndian.PutUint16(buf[18:20], 0)
 	buf[20] = BTRFS_FILE_EXTENT_REG

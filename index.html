@@ -295,10 +295,16 @@
               <td>Symlinks (fast/slow pathways). Hard links update link counts and references.</td>
             </tr>
             <tr>
+              <td class="b-term">Filesystem FSCK</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Ext4: 5-phase validation and auto-repairs. Btrfs: superblock, chunk map, and recursive node CRC32c verifications.</td>
+            </tr>
+            <tr>
               <td class="b-term">Compression Support</td>
               <td class="text-center status-no">&#x2718; No</td>
               <td class="text-center status-yes">&#x2714; Yes</td>
-              <td>Btrfs: transparent on-the-fly decompression of <strong>zlib</strong> and <strong>LZO</strong> extents.</td>
+              <td>Btrfs: transparent decompression of <strong>zlib</strong>, <strong>LZO</strong>, and <strong>ZSTD</strong> extents, with dynamic Zlib write compression.</td>
             </tr>
           </tbody>
         </table>
@@ -516,15 +522,15 @@
     <aside class="bound-notes">
       <div class="b-note">
         <span class="b-note-ref">btrfs writes</span>
-        <span class="b-note-body">Werunos fully supports both inline (up to 2KB) and regular extents (arbitrary sizes >2KB) on Btrfs, using physical chunk allocation and single-level B-tree leaf node splitting.</span>
+        <span class="b-note-body">Werunos fully supports both inline (up to 2KB) and regular extents (arbitrary sizes >2KB) on Btrfs, using physical chunk allocation and single-level B-tree leaf node splitting. Dynamic zlib write compression is automatically applied to compressible extents.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">redo log</span>
-        <span class="b-note-body">On every Ext4 and Btrfs WriteAt: pre-read the target block, write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed.</span>
+        <span class="b-note-body">On every Ext4 and Btrfs WriteAt: pre-read the target block (accelerated by a thread-safe 64-slot LRU block cache), write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">testing</span>
-        <span class="b-note-body">Prefer disk images over real drives. The redo log provides unified crash recovery, but always back up important data.</span>
+        <span class="b-note-body">Prefer disk images over real drives. The redo log provides unified crash recovery, and the built-in fsck verifier can systematically validate Btrfs and Ext4 volume integrity. Always back up important data.</span>
       </div>
     </aside>
   </div>

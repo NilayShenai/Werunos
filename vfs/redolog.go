@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 )
 
 const safeHdrSize = 12
@@ -112,9 +113,60 @@ func (l *safeLog) closeAndRemove() {
 	os.Remove(l.path)
 }
 
+type cacheBlock struct {
+	offset int64
+	data   []byte
+}
+
 type SafeDevice struct {
 	inner ReadWriterAt
 	log   *safeLog
+	cache []cacheBlock
+	mu    sync.Mutex
+}
+
+func (d *SafeDevice) lookupCache(p []byte, off int64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for _, block := range d.cache {
+		if off >= block.offset && off+int64(len(p)) <= block.offset+int64(len(block.data)) {
+			relativeOff := off - block.offset
+			copy(p, block.data[relativeOff:relativeOff+int64(len(p))])
+			return true
+		}
+	}
+	return false
+}
+
+func (d *SafeDevice) updateCache(p []byte, off int64) {
+	if len(p) == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for i, block := range d.cache {
+		if off >= block.offset && off+int64(len(p)) <= block.offset+int64(len(block.data)) {
+			relativeOff := off - block.offset
+			copy(d.cache[i].data[relativeOff:], p)
+			entry := d.cache[i]
+			copy(d.cache[1:i+1], d.cache[0:i])
+			d.cache[0] = entry
+			return
+		}
+	}
+
+	dataCopy := make([]byte, len(p))
+	copy(dataCopy, p)
+	newBlock := cacheBlock{offset: off, data: dataCopy}
+
+	if len(d.cache) >= 64 {
+		copy(d.cache[1:], d.cache[0:len(d.cache)-1])
+		d.cache[0] = newBlock
+	} else {
+		d.cache = append([]cacheBlock{newBlock}, d.cache...)
+	}
 }
 
 func NewSafeDevice(inner ReadWriterAt, deviceID string) (*SafeDevice, error) {
@@ -130,7 +182,6 @@ func NewSafeDevice(inner ReadWriterAt, deviceID string) (*SafeDevice, error) {
 	}
 
 	if len(entries) > 0 {
-
 		for _, e := range entries {
 			if _, err := inner.WriteAt(e.Data, e.Offset); err != nil {
 				l.closeAndRemove()
@@ -144,11 +195,22 @@ func NewSafeDevice(inner ReadWriterAt, deviceID string) (*SafeDevice, error) {
 		}
 	}
 
-	return &SafeDevice{inner: inner, log: l}, nil
+	return &SafeDevice{
+		inner: inner,
+		log:   l,
+		cache: make([]cacheBlock, 0),
+	}, nil
 }
 
 func (d *SafeDevice) ReadAt(p []byte, off int64) (int, error) {
-	return d.inner.ReadAt(p, off)
+	if d.lookupCache(p, off) {
+		return len(p), nil
+	}
+	n, err := d.inner.ReadAt(p, off)
+	if err == nil {
+		d.updateCache(p[:n], off)
+	}
+	return n, err
 }
 
 func (d *SafeDevice) WriteAt(p []byte, off int64) (int, error) {
@@ -157,9 +219,16 @@ func (d *SafeDevice) WriteAt(p []byte, off int64) (int, error) {
 	}
 
 	old := make([]byte, len(p))
-	n, err := d.inner.ReadAt(old, off)
-	if err != nil && err != io.EOF {
-		return 0, fmt.Errorf("safe: pre-read at %d: %w", off, err)
+	var n int
+	var err error
+	if d.lookupCache(old, off) {
+		n = len(p)
+	} else {
+		n, err = d.inner.ReadAt(old, off)
+		if err != nil && err != io.EOF {
+			return 0, fmt.Errorf("safe: pre-read at %d: %w", off, err)
+		}
+		d.updateCache(old[:n], off)
 	}
 	old = old[:n]
 
@@ -171,6 +240,7 @@ func (d *SafeDevice) WriteAt(p []byte, off int64) (int, error) {
 	if err != nil {
 		return written, err
 	}
+	d.updateCache(p[:written], off)
 
 	if cerr := d.log.removeLastEntry(off, len(old)); cerr != nil {
 		_ = cerr
