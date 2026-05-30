@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>WerunosApp</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.werunos.WerunosApp</string>
+	<key>CFBundleName</key>
+	<string>Werunos</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>img</string>
+				<string>raw</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Ext4 Disk Image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+	</array>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMessage</key>
+			<string>mountImageService</string>
+			<key>NSPortName</key>
+			<string>Werunos</string>
+			<key>NSSendTypes</key>
+			<array>
+				<string>NSFilenamesPboardType</string>
+			</array>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Mount with Werunos</string>
+			</dict>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSTargetFileExtensions</key>
+				<array>
+					<string>img</string>
+					<string>raw</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

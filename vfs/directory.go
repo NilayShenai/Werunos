@@ -102,16 +102,7 @@ func (fs *FileSystem) ReadDir(inode *Inode) ([]DirEntry2, error) {
 }
 
 func (fs *FileSystem) ReadDirCached(inode *Inode) ([]DirEntry2, error) {
-	key := inode.I_block
-	if cached, ok := fs.dirCache.Load(key); ok {
-		return cached.([]DirEntry2), nil
-	}
-	entries, err := fs.ReadDir(inode)
-	if err != nil {
-		return nil, err
-	}
-	fs.dirCache.Store(key, entries)
-	return entries, nil
+	return fs.ReadDir(inode)
 }
 
 func (fs *FileSystem) Lookup(dirInode *Inode, name string) (uint32, error) {
