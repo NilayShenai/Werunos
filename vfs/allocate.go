@@ -44,7 +44,7 @@ func (fs *FileSystem) AllocateBlock() (uint64, error) {
 						return 0, fmt.Errorf("AllocateBlock: failed to write block bitmap for group %d: %w", groupIdx, err)
 					}
 
-					blockNum := uint64(groupIdx)*blocksPerGroup + uint64(byteIdx)*8 + uint64(bit)
+					blockNum := uint64(groupIdx)*blocksPerGroup + uint64(byteIdx)*8 + uint64(bit) + uint64(sb.S_first_data_block)
 
 					bgd.BG_free_blocks_count_lo--
 					if err := fs.WriteGroupDescriptor(groupIdx, bgd); err != nil {

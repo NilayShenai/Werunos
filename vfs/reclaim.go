@@ -11,8 +11,12 @@ import (
 func (fs *FileSystem) FreeBlock(blockNum uint64) error {
 	sb := fs.sb
 	blocksPerGroup := uint64(sb.S_blocks_per_group)
-	groupIdx := uint32(blockNum / blocksPerGroup)
-	localIndex := blockNum % blocksPerGroup
+	if blockNum < uint64(sb.S_first_data_block) {
+		return fmt.Errorf("FreeBlock: block %d is below first data block %d", blockNum, sb.S_first_data_block)
+	}
+	relBlock := blockNum - uint64(sb.S_first_data_block)
+	groupIdx := uint32(relBlock / blocksPerGroup)
+	localIndex := relBlock % blocksPerGroup
 
 	if groupIdx >= fs.GroupCount {
 		return fmt.Errorf("FreeBlock: block %d group %d out of range", blockNum, groupIdx)
