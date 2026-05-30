@@ -261,8 +261,8 @@
             <tr>
               <td class="b-term">File Writing</td>
               <td class="text-center status-yes">&#x2714; Yes</td>
-              <td class="text-center status-yes">&#x2714; Yes <span class="status-warning">(Inline)</span></td>
-              <td>Ext4: full block allocator, extent appending. Btrfs: inline extent updates/writes (up to 2KB).</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Ext4: full block allocator, extent appending. Btrfs: inline/regular extents, dynamic block allocator with single-level B-tree leaf splitting.</td>
             </tr>
             <tr>
               <td class="b-term">Directory Ops</td>
@@ -493,12 +493,7 @@
         <tr>
           <td class="b-term">No btrfs CoW</td>
           <td>Leaf node writes updated in-place; bypasses transaction commits</td>
-          <td>Crash-unsafe but lightweight, keeping tree structures simple</td>
-        </tr>
-        <tr>
-          <td class="b-term">btrfs inline only</td>
-          <td>File writes/appends capped at 2KB on btrfs</td>
-          <td>Regular extent allocations and leaf splits not yet implemented</td>
+          <td>Crash-unsafe but lightweight, keeping tree structures simple (mitigated by SafeDevice redo logging)</td>
         </tr>
         <tr>
           <td class="b-term">No EA writes</td>
@@ -520,16 +515,16 @@
 
     <aside class="bound-notes">
       <div class="b-note">
-        <span class="b-note-ref">btrfs inline</span>
-        <span class="b-note-body">Inline extents store data directly in the B-tree leaf node. Writing files up to 2KB is fully functional; writes exceeding 2KB are restricted as leaf branches allocations/splits are not present.</span>
+        <span class="b-note-ref">btrfs writes</span>
+        <span class="b-note-body">Werunos fully supports both inline (up to 2KB) and regular extents (arbitrary sizes >2KB) on Btrfs, using physical chunk allocation and single-level B-tree leaf node splitting.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">redo log</span>
-        <span class="b-note-body">On every ext4 WriteAt: pre-read the target block, write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed.</span>
+        <span class="b-note-body">On every Ext4 and Btrfs WriteAt: pre-read the target block, write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">testing</span>
-        <span class="b-note-body">Prefer disk images over real drives. The redo log provides ext4 crash recovery, but always back up important data.</span>
+        <span class="b-note-body">Prefer disk images over real drives. The redo log provides unified crash recovery, but always back up important data.</span>
       </div>
     </aside>
   </div>

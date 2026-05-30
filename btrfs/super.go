@@ -76,7 +76,9 @@ func (sb *SuperBlock) parseSysChunks(tc *treeContext) error {
 
 		cr := &byteReader{buf: data[pos:]}
 		length := cr.u64()
-		cr.skip(24) // owner + stripe_len + type (flags)
+		_ = cr.u64() // owner
+		_ = cr.u64() // stripe_len
+		flags := cr.u64() // type (flags)
 		_ = cr.u32() // io_align
 		_ = cr.u32() // io_width
 		_ = cr.u32() // sector_size
@@ -97,7 +99,7 @@ func (sb *SuperBlock) parseSysChunks(tc *treeContext) error {
 		sr := &byteReader{buf: data[lastStripeOff:]}
 		sr.skip(8) // device_id
 		physOffset := sr.u64()
-		tc.addChunk(logical, length, physOffset)
+		tc.addChunk(logical, length, physOffset, flags)
 
 		pos += 48 + stripeTotal
 	}

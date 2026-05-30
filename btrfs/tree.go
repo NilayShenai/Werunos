@@ -8,6 +8,7 @@ type chunkMapping struct {
 	logical  uint64
 	length   uint64
 	physical uint64
+	flags    uint64
 }
 
 type treeContext struct {
@@ -37,8 +38,8 @@ func (tc *treeContext) resolve(logical uint64) (uint64, error) {
 	return 0, fmt.Errorf("btrfs: no chunk mapping for logical 0x%x", logical)
 }
 
-func (tc *treeContext) addChunk(logical, length, physical uint64) {
-	tc.chunks = append(tc.chunks, chunkMapping{logical: logical, length: length, physical: physical})
+func (tc *treeContext) addChunk(logical, length, physical, flags uint64) {
+	tc.chunks = append(tc.chunks, chunkMapping{logical: logical, length: length, physical: physical, flags: flags})
 }
 
 func (tc *treeContext) resolveChunkTree(rootAddr uint64, rootLevel uint8) error {
@@ -58,7 +59,7 @@ func (tc *treeContext) parseChunkItem(item leafItem, data []byte) error {
 	length := r.u64()
 	_ = r.u64() // owner
 	_ = r.u64() // stripe_len
-	_ = r.u64() // type (flags)
+	flags := r.u64() // type (flags)
 	_ = r.u32() // io_align
 	_ = r.u32() // io_width
 	_ = r.u32() // sector_size
@@ -75,7 +76,7 @@ func (tc *treeContext) parseChunkItem(item leafItem, data []byte) error {
 	_ = r.u64() // device_id of last stripe
 	physOffset := r.u64()
 
-	tc.addChunk(logical, length, physOffset)
+	tc.addChunk(logical, length, physOffset, flags)
 	return nil
 }
 

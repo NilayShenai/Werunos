@@ -40,7 +40,7 @@ If you have ever needed to access a Linux drive from Windows without booting a f
 | Operation | Ext4 Support | Btrfs Support | Technical Implementation / Reference |
 |---|---|---|---|
 | **Read files** | Yes | Yes | `reader.go` (ext4) / `tree.go` (btrfs): Chunk translation, inline and regular extent walks |
-| **Write files** | Yes | Yes (inline) | `writer.go` (ext4) / `fs.go` (btrfs): Block allocs (ext4) and inline writes/overwrites <2KB (btrfs) |
+| **Write files** | Yes | Yes (inline & regular) | `writer.go` (ext4) / `fs.go` (btrfs): Block allocs (ext4) and inline/regular writes with dynamic leaf splitting (btrfs) |
 | **Create files** | Yes | Yes | `allocate.go` (ext4) / `fs.go` (btrfs): Inode allocation, directory indexing updates |
 | **Delete files** | Yes | Yes | `reclaim.go` (ext4) / `fs.go` (btrfs): Block reclamation (ext4), B-tree leaf key unlinking (btrfs) |
 | **Truncate (grow/shrink)** | Yes | Yes | `reclaim.go` (ext4) / `fs.go` (btrfs): Extent splitting (ext4) and in-place B-tree leaf resizing (btrfs) |
@@ -96,7 +96,7 @@ If you have ever needed to access a Linux drive from Windows without booting a f
 | Chunk tree physical maps | `resolveChunkTree` | - | `btrfs/tree.go` |
 | Inodes (160B inode items) | `readInodeInfo` | `updateInLeaf` / `insertInodeItem` | `btrfs/fs.go`, `btrfs/writer.go` |
 | B-Tree node leaves | `walkFSTree` | `insertIntoLeaf` / `deleteFromLeaf` / `updateInLeaf` | `btrfs/tree.go`, `btrfs/writer.go` |
-| Extent data items | `readFile` | `Write` (inline, <2KB) | `btrfs/fs.go` |
+| Extent data items | `readFile` | `Write` (inline & regular) | `btrfs/fs.go` |
 | Directory entries (DIR_INDEX) | `readDirEntries` | `insertDirEntry` | `btrfs/fs.go`, `btrfs/writer.go` |
 | Symlinks (inline extents) | `readSymlink` | `Symlink` (inline extent data) | `btrfs/fs.go` |
 
@@ -325,8 +325,7 @@ on a SATA SSD for sequential writes: 150-300 MB/s. Random 4K writes: 5-15 MB/s.
 |---|---|---|
 | **Depth-0 extents only (ext4)** | Files with >4 non-contiguous extents cannot be extended. | Full B-tree manipulation (index block splits, rotations) is bypassed to keep code minimal. |
 | **No journal submission (ext4)** | Metadata writes bypass jbd2. The redo log handles crashes; on restart the journal is clean. | Implementing the full transaction submission requires a complex descriptor/data/commit pipeline. |
-| **No btrfs Copy-on-Write (CoW)** | Btrfs B-tree leaf node writes are updated in-place. | Bypassing chunk splits and CoW tree transactions keeps driver footprint lightweight and simple. |
-| **Btrfs inline extents only** | Btrfs file writes/appends are capped at 2KB. | Regular non-inline extent allocations and leaf split balances are not implemented. |
+| **No btrfs Copy-on-Write (CoW)** | Btrfs B-tree leaf node writes are updated in-place. | Bypassing chunk splits and CoW tree transactions keeps driver footprint lightweight and simple (protected by SafeDevice transaction redo logging). |
 | **No EA writes** | Extended attributes are preserved on read-modify-write but not modified. | Inode EA area lives in the extended space beyond the 128-byte base inode. |
 | **No encryption** | Encrypted files (`EXT4_ENCRYPT_FL` / fscrypt) are skipped. | Requires integration with kernel keychain/keyring libraries. |
 | **No ext4 metadata checksums** | `metadata_csum` feature is not verified or updated on ext4 writes. | Verification would add significant parsing overhead (Btrfs CRC32c is fully calculated). |
@@ -361,7 +360,7 @@ While WSL2's `wsl --mount` works, it requires you to have WSL2 fully installed, 
 **What filesystem features are NOT supported?**
 
 For Ext4: legacy indirect blocks, inline data, encryption, and extended attributes >1 block.
-For Btrfs: files >2KB (regular non-inline extents), transaction-based copy-on-write commits, and metadata/data splits.
+For Btrfs: legacy transaction-based copy-on-write commits and metadata/data splits (mitigated/protected by our unified block-level SafeDevice transaction redo log).
 All common layout structures (ext4 extents, flex_bg, 64bit, HTree directories, btrfs system chunk tables, logical stripe chunk maps, leaf items, zlib/LZO segment frames) are fully supported.
 
 ---
@@ -370,7 +369,6 @@ All common layout structures (ext4 extents, flex_bg, 64bit, HTree directories, b
 
 Werunos aims to expand userspace driver coverage and enhance transactional safety. The roadmap includes:
 
-- **Regular non-inline extent writes (Btrfs)**: Implement physical chunk allocation and leaf branch splits to support writing files larger than 2KB on Btrfs.
 - **Copy-on-Write (CoW) transactions (Btrfs)**: Transition from in-place leaf mutations to standard CoW tree modifications with transaction commits to ensure crash safety.
 - **Unified FSCK validation (Btrfs)**: Extend the CLI `fsck` command to systematically check Btrfs logical-to-physical stripe groupings, tree generation counts, and CRC32c leaf signatures.
 - **Multi-depth extent B-trees (Ext4)**: Support index block splits and rotations to allow extending files with more than 4 non-contiguous extents.

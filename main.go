@@ -255,18 +255,15 @@ func runMount() error {
 	pr := block.NewPartitionReader(f, target)
 	deviceID := fmt.Sprintf("%s_p%d", diskPath, partNum)
 
-	filesys, err := openFilesystem(pr)
-	if err != nil {
-		safeDev, safeErr := vfs.NewSafeDevice(pr, deviceID)
-		if safeErr != nil {
-			return fmt.Errorf("failed to detect filesystem: %w", err)
-		}
+	safeDev, safeErr := vfs.NewSafeDevice(pr, deviceID)
+	if safeErr != nil {
+		return fmt.Errorf("failed to initialize safe device: %w", safeErr)
+	}
+	defer safeDev.Close()
 
-		ext4fs := ext4.New(safeDev)
-		if sbErr := ext4fs.ReadSuperBlock(); sbErr != nil {
-			return fmt.Errorf("not a supported filesystem (tried ext4, btrfs): %w", err)
-		}
-		filesys = ext4fs
+	filesys, err := openFilesystem(safeDev)
+	if err != nil {
+		return fmt.Errorf("failed to detect filesystem: %w", err)
 	}
 
 	fmt.Printf("Detected filesystem: %s\n", filesys.Type())
@@ -282,18 +279,15 @@ func runMountImage(mountPoint, imagePath string) error {
 
 	fmt.Printf("Mode: raw image (%s)\n", imagePath)
 
-	filesys, err := openFilesystem(f)
-	if err != nil {
-		safeDev, safeErr := vfs.NewSafeDevice(f, imagePath)
-		if safeErr != nil {
-			return fmt.Errorf("failed to detect filesystem: %w", err)
-		}
+	safeDev, safeErr := vfs.NewSafeDevice(f, imagePath)
+	if safeErr != nil {
+		return fmt.Errorf("failed to initialize safe device: %w", safeErr)
+	}
+	defer safeDev.Close()
 
-		ext4fs := ext4.New(safeDev)
-		if sbErr := ext4fs.ReadSuperBlock(); sbErr != nil {
-			return fmt.Errorf("not a supported filesystem (tried ext4, btrfs): %w", err)
-		}
-		filesys = ext4fs
+	filesys, err := openFilesystem(safeDev)
+	if err != nil {
+		return fmt.Errorf("failed to detect filesystem: %w", err)
 	}
 
 	fmt.Printf("Detected filesystem: %s\n", filesys.Type())

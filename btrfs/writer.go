@@ -3,11 +3,21 @@ package btrfs
 import (
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"time"
 )
 
+type itemEntry struct {
+	k    key
+	data []byte
+}
+
 func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) error {
-	physAddr, err := b.tc.resolve(logicalAddr)
+	leafLogical, err := b.resolveLeaf(logicalAddr, k)
+	if err != nil {
+		return err
+	}
+	physAddr, err := b.tc.resolve(leafLogical)
 	if err != nil {
 		return err
 	}
@@ -64,10 +74,6 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 		return fmt.Errorf("btrfs: leaf full")
 	}
 
-	type itemEntry struct {
-		k    key
-		data []byte
-	}
 	all := make([]itemEntry, nritems+1)
 	ins := insertIdx
 	for i := 0; i < ins; i++ {
@@ -87,7 +93,7 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 	// Check space: header + items + data must fit in node
 	needed := nodeHeaderSize + len(all)*25 + totalData
 	if needed > bs {
-		return fmt.Errorf("btrfs: leaf has no space (need %d, have %d)", needed, bs)
+		return b.splitLeaf(leafLogical, k, all, bs, ins)
 	}
 
 	// Build new leaf
@@ -116,7 +122,7 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 	binary.LittleEndian.PutUint32(dst[96:100], uint32(len(all)))
 	binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
 
-	binary.LittleEndian.PutUint64(dst[48:56], uint64(logicalAddr))
+	binary.LittleEndian.PutUint64(dst[48:56], uint64(leafLogical))
 
 	csum := calcCrc32c(dst[32:])
 	binary.LittleEndian.PutUint32(dst[0:4], csum)
@@ -326,7 +332,11 @@ func init() {
 }
 
 func (b *FileSystem) deleteFromLeaf(logicalAddr uint64, k key) error {
-	physAddr, err := b.tc.resolve(logicalAddr)
+	leafLogical, err := b.resolveLeaf(logicalAddr, k)
+	if err != nil {
+		return err
+	}
+	physAddr, err := b.tc.resolve(leafLogical)
 	if err != nil {
 		return err
 	}
@@ -412,7 +422,7 @@ func (b *FileSystem) deleteFromLeaf(logicalAddr uint64, k key) error {
 
 	binary.LittleEndian.PutUint32(dst[96:100], uint32(len(all)))
 	binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
-	binary.LittleEndian.PutUint64(dst[48:56], uint64(logicalAddr))
+	binary.LittleEndian.PutUint64(dst[48:56], uint64(leafLogical))
 
 	csum := calcCrc32c(dst[32:])
 	binary.LittleEndian.PutUint32(dst[0:4], csum)
@@ -424,7 +434,11 @@ func (b *FileSystem) deleteFromLeaf(logicalAddr uint64, k key) error {
 }
 
 func (b *FileSystem) updateInLeaf(logicalAddr uint64, k key, itemData []byte) error {
-	physAddr, err := b.tc.resolve(logicalAddr)
+	leafLogical, err := b.resolveLeaf(logicalAddr, k)
+	if err != nil {
+		return err
+	}
+	physAddr, err := b.tc.resolve(leafLogical)
 	if err != nil {
 		return err
 	}
@@ -516,7 +530,7 @@ func (b *FileSystem) updateInLeaf(logicalAddr uint64, k key, itemData []byte) er
 
 	binary.LittleEndian.PutUint32(dst[96:100], uint32(len(items)))
 	binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
-	binary.LittleEndian.PutUint64(dst[48:56], uint64(logicalAddr))
+	binary.LittleEndian.PutUint64(dst[48:56], uint64(leafLogical))
 
 	csum := calcCrc32c(dst[32:])
 	binary.LittleEndian.PutUint32(dst[0:4], csum)
@@ -525,5 +539,256 @@ func (b *FileSystem) updateInLeaf(logicalAddr uint64, k key, itemData []byte) er
 		return fmt.Errorf("btrfs: write leaf: %w", err)
 	}
 	return nil
+}
+
+func (b *FileSystem) findLeaf(root uint64, lvl uint8, k key) (uint64, error) {
+	if lvl == 0 {
+		return root, nil
+	}
+	phys, err := b.tc.resolve(root)
+	if err != nil {
+		return 0, err
+	}
+	buf, err := readNode(b.dev, phys, b.sb.NodeSize)
+	if err != nil {
+		return 0, err
+	}
+	r := &byteReader{buf: buf}
+	h := decodeNodeHeader(r)
+	if h.level == 0 {
+		return root, nil
+	}
+
+	var bestPtr uint64 = 0
+	for i := uint32(0); i < h.nritems; i++ {
+		p := decodeInternalPtr(r)
+		if i == 0 || !k.less(p.key) {
+			bestPtr = p.blockptr
+		}
+	}
+	if bestPtr == 0 {
+		return root, nil
+	}
+	return b.findLeaf(bestPtr, h.level-1, k)
+}
+
+func (b *FileSystem) resolveLeaf(logicalAddr uint64, k key) (uint64, error) {
+	var lvl uint8
+	if logicalAddr == b.fsRoot {
+		lvl = b.fsRootLvl
+	} else if logicalAddr == b.extentRoot {
+		lvl = b.extentRootLvl
+	} else if logicalAddr == b.sb.ChunkRoot {
+		lvl = b.sb.ChunkRootLevel
+	} else {
+		return logicalAddr, nil
+	}
+	return b.findLeaf(logicalAddr, lvl, k)
+}
+
+type extentRange struct {
+	logical uint64
+	length  uint64
+}
+
+func (b *FileSystem) allocateSpace(size uint64, bgType uint64) (logical uint64, physical uint64, err error) {
+	var targetChunk *chunkMapping
+	for i := range b.tc.chunks {
+		c := &b.tc.chunks[i]
+		if c.flags&bgType != 0 {
+			targetChunk = c
+			break
+		}
+	}
+	if targetChunk == nil {
+		if len(b.tc.chunks) > 0 {
+			targetChunk = &b.tc.chunks[0]
+		} else {
+			return 0, 0, fmt.Errorf("btrfs: no chunk mappings found for allocation")
+		}
+	}
+
+	var occupied []extentRange
+
+	_ = b.walkExtentTree(func(item leafItem, data []byte) error {
+		if item.key.typ == BTRFS_EXTENT_ITEM_KEY {
+			occupied = append(occupied, extentRange{
+				logical: item.key.objectid,
+				length:  item.key.offset,
+			})
+		} else if item.key.typ == 169 {
+			occupied = append(occupied, extentRange{
+				logical: item.key.objectid,
+				length:  uint64(b.sb.NodeSize),
+			})
+		}
+		return nil
+	})
+
+	_ = b.walkFSTree(func(item leafItem, data []byte) error {
+		if item.key.typ == BTRFS_EXTENT_DATA_KEY {
+			if len(data) >= 45 && data[20] != BTRFS_FILE_EXTENT_INLINE {
+				diskBytenr := binary.LittleEndian.Uint64(data[21:29])
+				diskNumBytes := binary.LittleEndian.Uint64(data[29:37])
+				if diskBytenr > 0 && diskNumBytes > 0 {
+					occupied = append(occupied, extentRange{
+						logical: diskBytenr,
+						length:  diskNumBytes,
+					})
+				}
+			}
+		}
+		return nil
+	})
+
+	sort.Slice(occupied, func(i, j int) bool {
+		return occupied[i].logical < occupied[j].logical
+	})
+
+	sectorSize := uint64(b.sb.SectorSize)
+	if sectorSize == 0 {
+		sectorSize = 4096
+	}
+	alignedSize := ((size + sectorSize - 1) / sectorSize) * sectorSize
+
+	candidate := targetChunk.logical
+	for _, occ := range occupied {
+		if occ.logical+occ.length <= candidate {
+			continue
+		}
+		if occ.logical >= candidate+alignedSize {
+			break
+		}
+		candidate = occ.logical + occ.length
+		candidate = ((candidate + sectorSize - 1) / sectorSize) * sectorSize
+	}
+
+	if candidate+alignedSize <= targetChunk.logical+targetChunk.length {
+		logical = candidate
+		physical = targetChunk.physical + (logical - targetChunk.logical)
+		return logical, physical, nil
+	}
+
+	return 0, 0, fmt.Errorf("btrfs: out of disk space in block group %d", bgType)
+}
+
+func (b *FileSystem) registerExtent(logicalAddr uint64, length uint64) error {
+	if b.extentRoot == 0 {
+		return nil
+	}
+	payload := make([]byte, 24)
+	binary.LittleEndian.PutUint64(payload[0:8], 1)
+	binary.LittleEndian.PutUint64(payload[8:16], b.sb.Generation)
+	binary.LittleEndian.PutUint64(payload[16:24], 1)
+
+	return b.insertIntoLeaf(b.extentRoot, key{
+		objectid: logicalAddr,
+		typ:      BTRFS_EXTENT_ITEM_KEY,
+		offset:   length,
+	}, payload)
+}
+
+func (b *FileSystem) writeItemsToLeaf(leafLogical uint64, items []itemEntry, bs int) error {
+	physAddr, err := b.tc.resolve(leafLogical)
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, bs)
+	if _, err := b.dev.ReadAt(buf, int64(physAddr)); err != nil {
+		buf = make([]byte, bs)
+	}
+
+	dst := make([]byte, bs)
+	copy(dst[:nodeHeaderSize], buf[:nodeHeaderSize])
+
+	dataPos := bs
+	for i := len(items) - 1; i >= 0; i-- {
+		sz := len(items[i].data)
+		dataPos -= sz
+		copy(dst[dataPos:dataPos+sz], items[i].data)
+	}
+
+	curDataOff := dataPos
+	for i, it := range items {
+		off := nodeHeaderSize + i*25
+		encodeKeyInto(dst[off:off+17], it.k)
+		relOff := curDataOff - nodeHeaderSize
+		binary.LittleEndian.PutUint32(dst[off+17:off+21], uint32(relOff))
+		binary.LittleEndian.PutUint32(dst[off+21:off+25], uint32(len(it.data)))
+		curDataOff += len(it.data)
+	}
+
+	binary.LittleEndian.PutUint32(dst[96:100], uint32(len(items)))
+	binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
+	binary.LittleEndian.PutUint64(dst[48:56], uint64(leafLogical))
+
+	csum := calcCrc32c(dst[32:])
+	binary.LittleEndian.PutUint32(dst[0:4], csum)
+
+	_, err = b.dev.WriteAt(dst, int64(physAddr))
+	return err
+}
+
+func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs int, ins int) error {
+	newLeafLogical, _, err := b.allocateSpace(uint64(bs), BTRFS_BLOCK_GROUP_METADATA)
+	if err != nil {
+		return fmt.Errorf("btrfs: split leaf: fail to allocate node: %w", err)
+	}
+
+	mid := len(all) / 2
+	leftItems := all[:mid]
+	rightItems := all[mid:]
+
+	err = b.writeItemsToLeaf(logicalLeaf, leftItems, bs)
+	if err != nil {
+		return err
+	}
+
+	err = b.writeItemsToLeaf(newLeafLogical, rightItems, bs)
+	if err != nil {
+		return err
+	}
+
+	_ = b.registerExtent(newLeafLogical, uint64(bs))
+
+	if b.fsRoot == logicalLeaf && b.fsRootLvl == 0 {
+		newRootLogical, newRootPhys, err := b.allocateSpace(uint64(bs), BTRFS_BLOCK_GROUP_METADATA)
+		if err != nil {
+			return err
+		}
+
+		dst := make([]byte, bs)
+		binary.LittleEndian.PutUint32(dst[96:100], 2)
+		dst[100] = 1
+		binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
+		binary.LittleEndian.PutUint64(dst[48:56], newRootLogical)
+		binary.LittleEndian.PutUint64(dst[112:120], 5)
+
+		off1 := nodeHeaderSize
+		encodeKeyInto(dst[off1:off1+17], leftItems[0].k)
+		binary.LittleEndian.PutUint64(dst[off1+17:off1+25], logicalLeaf)
+		binary.LittleEndian.PutUint64(dst[off1+25:off1+33], b.sb.Generation)
+
+		off2 := nodeHeaderSize + 33
+		encodeKeyInto(dst[off2:off2+17], rightItems[0].k)
+		binary.LittleEndian.PutUint64(dst[off2+17:off2+25], newLeafLogical)
+		binary.LittleEndian.PutUint64(dst[off2+25:off2+33], b.sb.Generation)
+
+		csum := calcCrc32c(dst[32:])
+		binary.LittleEndian.PutUint32(dst[0:4], csum)
+
+		if _, err := b.dev.WriteAt(dst, int64(newRootPhys)); err != nil {
+			return err
+		}
+
+		_ = b.registerExtent(newRootLogical, uint64(bs))
+
+		b.fsRoot = newRootLogical
+		b.fsRootLvl = 1
+
+		return nil
+	}
+
+	return fmt.Errorf("btrfs: leaf has no space (need %d, have %d) and split not supported above level 0", nodeHeaderSize+len(all)*25, bs)
 }
 

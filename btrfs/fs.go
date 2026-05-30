@@ -19,15 +19,17 @@ type readWriterAt interface {
 }
 
 type FileSystem struct {
-	dev       readWriterAt
-	sb        *SuperBlock
-	tc        *treeContext
-	fsRoot    uint64
-	fsRootLvl uint8
-	rootInode uint64
-	pathCache sync.Map
-	nextInode uint64
-	mu        sync.Mutex
+	dev           readWriterAt
+	sb            *SuperBlock
+	tc            *treeContext
+	fsRoot        uint64
+	fsRootLvl     uint8
+	extentRoot    uint64
+	extentRootLvl uint8
+	rootInode     uint64
+	pathCache     sync.Map
+	nextInode     uint64
+	mu            sync.Mutex
 }
 
 func New(dev interface {
@@ -64,6 +66,13 @@ func (b *FileSystem) ReadSuperBlock() error {
 	b.fsRoot = fsRoot
 	b.fsRootLvl = fsLvl
 	b.rootInode = rootDirID
+
+	extRoot, extLvl, err := b.findExtentTreeRoot()
+	if err == nil {
+		b.extentRoot = extRoot
+		b.extentRootLvl = extLvl
+	}
+
 	return nil
 }
 
@@ -152,11 +161,8 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if uint64(ofst)+uint64(len(buf)) > 2048 {
-		return 0, fmt.Errorf("btrfs: write larger than 2048 not yet supported")
-	}
 
-	// 1. Read existing inline extent data if it exists
+	// 1. Read existing extent data if it exists
 	var extData []byte
 	var foundExtKey key
 	b.walkFSTree(func(item leafItem, d []byte) error {
@@ -173,15 +179,15 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 
 	var currentContent []byte
 	if len(extData) > 0 {
-		// Parse inline extent
-		r := &byteReader{buf: extData}
-		r.skip(8) // generation
-		ramBytes := r.u64() // size
-		ctype := r.u8()
-		r.skip(1) // encryption
-		r.skip(2) // other
-		extType := r.u8()
+		extType := extData[20]
 		if extType == BTRFS_FILE_EXTENT_INLINE {
+			r := &byteReader{buf: extData}
+			r.skip(8) // generation
+			ramBytes := r.u64() // size
+			ctype := r.u8()
+			r.skip(1) // encryption
+			r.skip(2) // other
+			r.skip(1) // extType
 			raw := extData[r.off:]
 			if ctype != BTRFS_COMPRESS_NONE {
 				dec, err := decompressData(ctype, raw, ramBytes)
@@ -191,6 +197,16 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 			} else {
 				currentContent = make([]byte, len(raw))
 				copy(currentContent, raw)
+			}
+		} else if extType == BTRFS_FILE_EXTENT_REG {
+			diskBytenr := binary.LittleEndian.Uint64(extData[21:29])
+			numBytes := binary.LittleEndian.Uint64(extData[45:53])
+			if diskBytenr > 0 && numBytes > 0 {
+				phys, err := b.tc.resolve(diskBytenr)
+				if err == nil {
+					currentContent = make([]byte, numBytes)
+					_, _ = b.dev.ReadAt(currentContent, int64(phys))
+				}
 			}
 		}
 	}
@@ -203,17 +219,58 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 	}
 	copy(finalContent[ofst:], buf)
 
-	// 3. Prepare the new inline extent item
-	newExtItem := makeExtentDataInline(0, finalContent)
-
-	// 4. Insert or update the leaf
-	if len(extData) > 0 {
-		// Update existing
-		if err := b.updateInLeaf(b.fsRoot, foundExtKey, newExtItem); err != nil {
-			return 0, err
+	// 3. Choose Inline vs Regular Extent based on size
+	if newSize <= 2048 {
+		newExtItem := makeExtentDataInline(0, finalContent)
+		if len(extData) > 0 {
+			if err := b.updateInLeaf(b.fsRoot, foundExtKey, newExtItem); err != nil {
+				return 0, err
+			}
+		} else {
+			if err := b.insertIntoLeaf(b.fsRoot, key{
+				objectid: inodeNum,
+				typ:      BTRFS_EXTENT_DATA_KEY,
+				offset:   0,
+			}, newExtItem); err != nil {
+				return 0, err
+			}
 		}
 	} else {
-		// Insert new
+		// Regular Extent Path (>2KB)
+		logicalAddr, physAddr, err := b.allocateSpace(newSize, BTRFS_BLOCK_GROUP_DATA)
+		if err != nil {
+			return 0, err
+		}
+
+		sectorSize := uint64(b.sb.SectorSize)
+		if sectorSize == 0 {
+			sectorSize = 4096
+		}
+		alignedSize := ((newSize + sectorSize - 1) / sectorSize) * sectorSize
+
+		diskBuf := make([]byte, alignedSize)
+		copy(diskBuf, finalContent)
+
+		if _, err := b.dev.WriteAt(diskBuf, int64(physAddr)); err != nil {
+			return 0, fmt.Errorf("btrfs: write regular extent: %w", err)
+		}
+
+		_ = b.registerExtent(logicalAddr, alignedSize)
+
+		// Delete existing extents to prevent duplicates/corruptions
+		var keysToDelete []key
+		b.walkFSTree(func(item leafItem, d []byte) error {
+			if item.key.objectid == inodeNum && item.key.typ == BTRFS_EXTENT_DATA_KEY {
+				keysToDelete = append(keysToDelete, item.key)
+			}
+			return nil
+		})
+		for _, k := range keysToDelete {
+			_ = b.deleteFromLeaf(b.fsRoot, k)
+		}
+
+		// Insert the new regular extent metadata item
+		newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, newSize)
 		if err := b.insertIntoLeaf(b.fsRoot, key{
 			objectid: inodeNum,
 			typ:      BTRFS_EXTENT_DATA_KEY,
@@ -223,7 +280,7 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 		}
 	}
 
-	// 5. Update inode size in the FS tree
+	// 4. Update inode size in the FS tree
 	var inodeData []byte
 	b.walkFSTree(func(item leafItem, d []byte) error {
 		if item.key.objectid == inodeNum && item.key.typ == BTRFS_INODE_ITEM_KEY {
@@ -251,6 +308,21 @@ func (b *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 
 	b.pathCache.Delete(path)
 	return len(buf), nil
+}
+
+func (b *FileSystem) makeExtentDataRegular(logicalAddr uint64, diskSize uint64, ramSize uint64) []byte {
+	buf := make([]byte, 53)
+	binary.LittleEndian.PutUint64(buf[0:8], b.sb.Generation)
+	binary.LittleEndian.PutUint64(buf[8:16], ramSize)
+	buf[16] = 0 // compression = none
+	buf[17] = 0 // encryption = none
+	binary.LittleEndian.PutUint16(buf[18:20], 0)
+	buf[20] = BTRFS_FILE_EXTENT_REG
+	binary.LittleEndian.PutUint64(buf[21:29], logicalAddr)
+	binary.LittleEndian.PutUint64(buf[29:37], diskSize)
+	binary.LittleEndian.PutUint64(buf[37:45], 0) // offset
+	binary.LittleEndian.PutUint64(buf[45:53], ramSize)
+	return buf
 }
 
 func (b *FileSystem) Mkdir(path string, mode uint32) error {
@@ -644,7 +716,7 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 			}
 		}
 	} else {
-		// If size is non-zero, let's find the inline extent and resize it!
+		// If size is non-zero, let's find the extent and resize it!
 		var extKey key
 		var extData []byte
 		b.walkFSTree(func(item leafItem, d []byte) error {
@@ -656,18 +728,107 @@ func (b *FileSystem) Truncate(path string, size int64) error {
 			return nil
 		})
 		if len(extData) > 0 {
-			header := make([]byte, 21)
-			copy(header, extData[:21])
-			
-			oldInlineData := extData[21:]
-			newInlineData := make([]byte, size)
-			copy(newInlineData, oldInlineData) // shrinks or pads with zeros
-			
-			binary.LittleEndian.PutUint64(header[8:16], uint64(size))
-			newExtData := append(header, newInlineData...)
-			
-			if err := b.updateInLeaf(b.fsRoot, extKey, newExtData); err != nil {
-				return err
+			extType := extData[20]
+			if extType == BTRFS_FILE_EXTENT_INLINE {
+				if size <= 2048 {
+					// Traditional inline resize
+					header := make([]byte, 21)
+					copy(header, extData[:21])
+					
+					oldInlineData := extData[21:]
+					newInlineData := make([]byte, size)
+					copy(newInlineData, oldInlineData)
+					
+					binary.LittleEndian.PutUint64(header[8:16], uint64(size))
+					newExtData := append(header, newInlineData...)
+					
+					if err := b.updateInLeaf(b.fsRoot, extKey, newExtData); err != nil {
+						return err
+					}
+				} else {
+					// Growing beyond 2KB: convert to regular extent!
+					oldInlineData := extData[21:]
+					newContent := make([]byte, size)
+					copy(newContent, oldInlineData)
+					
+					logicalAddr, physAddr, err := b.allocateSpace(uint64(size), BTRFS_BLOCK_GROUP_DATA)
+					if err != nil {
+						return err
+					}
+					
+					sectorSize := uint64(b.sb.SectorSize)
+					if sectorSize == 0 {
+						sectorSize = 4096
+					}
+					alignedSize := ((uint64(size) + sectorSize - 1) / sectorSize) * sectorSize
+					
+					diskBuf := make([]byte, alignedSize)
+					copy(diskBuf, newContent)
+					
+					if _, err := b.dev.WriteAt(diskBuf, int64(physAddr)); err != nil {
+						return err
+					}
+					
+					_ = b.registerExtent(logicalAddr, alignedSize)
+					_ = b.deleteFromLeaf(b.fsRoot, extKey)
+					
+					newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, uint64(size))
+					if err := b.insertIntoLeaf(b.fsRoot, key{
+						objectid: inodeNum,
+						typ:      BTRFS_EXTENT_DATA_KEY,
+						offset:   0,
+					}, newExtItem); err != nil {
+						return err
+					}
+				}
+			} else if extType == BTRFS_FILE_EXTENT_REG {
+				// Regular extent resize
+				diskBytenr := binary.LittleEndian.Uint64(extData[21:29])
+				numBytes := binary.LittleEndian.Uint64(extData[45:53])
+				
+				var oldContent []byte
+				if diskBytenr > 0 && numBytes > 0 {
+					phys, err := b.tc.resolve(diskBytenr)
+					if err == nil {
+						oldContent = make([]byte, numBytes)
+						_, _ = b.dev.ReadAt(oldContent, int64(phys))
+					}
+				}
+				
+				newContent := make([]byte, size)
+				if len(oldContent) > 0 {
+					copy(newContent, oldContent)
+				}
+				
+				logicalAddr, physAddr, err := b.allocateSpace(uint64(size), BTRFS_BLOCK_GROUP_DATA)
+				if err != nil {
+					return err
+				}
+				
+				sectorSize := uint64(b.sb.SectorSize)
+				if sectorSize == 0 {
+					sectorSize = 4096
+				}
+				alignedSize := ((uint64(size) + sectorSize - 1) / sectorSize) * sectorSize
+				
+				diskBuf := make([]byte, alignedSize)
+				copy(diskBuf, newContent)
+				
+				if _, err := b.dev.WriteAt(diskBuf, int64(physAddr)); err != nil {
+					return err
+				}
+				
+				_ = b.registerExtent(logicalAddr, alignedSize)
+				_ = b.deleteFromLeaf(b.fsRoot, extKey)
+				
+				newExtItem := b.makeExtentDataRegular(logicalAddr, alignedSize, uint64(size))
+				if err := b.insertIntoLeaf(b.fsRoot, key{
+					objectid: inodeNum,
+					typ:      BTRFS_EXTENT_DATA_KEY,
+					offset:   0,
+				}, newExtItem); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1297,6 +1458,45 @@ func (b *FileSystem) readFromExtents(extents []extentInfo, buf []byte, ofst, fil
 
 func (b *FileSystem) walkFSTree(cb func(leafItem, []byte) error) error {
 	return b.tc.walkTree(b.fsRoot, b.fsRootLvl, cb)
+}
+
+func (b *FileSystem) findExtentTreeRoot() (rootAddr uint64, rootLvl uint8, err error) {
+	err = b.tc.walkTree(b.sb.Root, b.sb.RootLevel, func(item leafItem, data []byte) error {
+		if item.key.typ == BTRFS_ROOT_ITEM_KEY && item.key.objectid == 2 { // BTRFS_EXTENT_TREE_OBJECTID
+			if len(data) < 240 {
+				return nil
+			}
+			r := &byteReader{buf: data}
+			r.skip(160)
+			r.skip(8)
+			_ = r.u64()
+			rootAddr = r.u64()
+			r.skip(8)
+			r.skip(8)
+			r.skip(8)
+			r.skip(8)
+			r.skip(4)
+			r.skip(17)
+			_ = r.u8()
+			rootLvl = r.u8()
+			return fmt.Errorf("stop")
+		}
+		return nil
+	})
+	if rootAddr == 0 {
+		err = fmt.Errorf("btrfs: extent tree root not found")
+	}
+	if err != nil && err.Error() == "stop" {
+		err = nil
+	}
+	return
+}
+
+func (b *FileSystem) walkExtentTree(cb func(leafItem, []byte) error) error {
+	if b.extentRoot == 0 {
+		return fmt.Errorf("btrfs: extent tree not loaded")
+	}
+	return b.tc.walkTree(b.extentRoot, b.extentRootLvl, cb)
 }
 
 
