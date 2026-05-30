@@ -1,6 +1,6 @@
 version: 2
 
-project_name: janus
+project_name: Werunos
 
 before:
   hooks:
@@ -8,8 +8,8 @@ before:
     - go fmt ./...
 
 builds:
-  - id: janus
-    binary: janus
+  - id: werunos
+    binary: werunos
     env:
       - CGO_ENABLED=1
       - CGO_CFLAGS=-IC:/PROGRA~2/WinFsp/inc/fuse

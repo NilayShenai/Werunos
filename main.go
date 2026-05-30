@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -9,8 +8,11 @@ import (
 	"strings"
 
 	"github.com/NilayShenai/Werunos/block"
-	"github.com/NilayShenai/Werunos/vfs"
+	"github.com/NilayShenai/Werunos/btrfs"
+	"github.com/NilayShenai/Werunos/ext4"
+	"github.com/NilayShenai/Werunos/fs"
 	"github.com/NilayShenai/Werunos/host"
+	"github.com/NilayShenai/Werunos/vfs"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -25,25 +27,18 @@ func run() error {
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
 		case "devices":
-
 			return runDevices()
-
 		case "install":
-
 			return runInstall()
-
 		case "mount":
-
 			return runMount()
 		}
 	}
 
 	switch {
 	case len(os.Args) == 2 && os.Args[1] == "fsck":
-
 		return runFsck("testfs.img", false)
 	case len(os.Args) == 3 && os.Args[1] == "fsck":
-
 		if os.Args[2] == "--fix" {
 			return fmt.Errorf("usage: werunos fsck [--fix] <device> [<partNum>]")
 		}
@@ -81,9 +76,44 @@ func run() error {
 				"  werunos fsck [--fix] <device> [<part>]   check/repair ext4 filesystem\n" +
 				"  werunos <device>                         list partitions on device\n" +
 				"  werunos <device> <partNum>               read root dir of partition\n" +
-				"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n",
+				"  werunos mount <letter> <disk> <partNum>  mount partition as drive letter\n"+
+				"  (supports ext4 and btrfs filesystems)\n",
 		)
 	}
+}
+
+func openFilesystem(dev vfs.ReadWriterAt) (fs.FileSystem, error) {
+	ext4fs := ext4.New(dev)
+	if err := ext4fs.ReadSuperBlock(); err == nil {
+		return ext4fs, nil
+	}
+
+	btrfsfs := btrfs.New(dev)
+	if err := btrfsfs.ReadSuperBlock(); err == nil {
+		return btrfsfs, nil
+	}
+
+	return nil, fmt.Errorf("unknown filesystem (not ext4 or btrfs)")
+}
+
+func mountFilesystem(dev fs.FileSystem, mountPoint string, volName string) error {
+	if volName == "" {
+		volName = dev.Type()
+	}
+	volName = sanitizeVolName(volName)
+
+	hostFS := host.NewOrionFS(dev)
+	fuseSrv := fuse.NewFileSystemHost(hostFS)
+	mountArgs := []string{"-o", fmt.Sprintf("uid=-1,gid=-1,volname=%s", volName)}
+	fmt.Printf("Mounting %s at %s … (press Ctrl+C or right-click → Eject to unmount)\n", volName, mountPoint)
+
+	ok := fuseSrv.Mount(mountPoint, mountArgs)
+	if !ok {
+		return fmt.Errorf("mount failed - ensure WinFsp is installed")
+	}
+
+	fmt.Println("Unmounted successfully.")
+	return nil
 }
 
 func runDevices() error {
@@ -139,9 +169,9 @@ func runMount() error {
 	args := os.Args
 	if len(args) < 4 || len(args) > 5 {
 		return fmt.Errorf(
-			"usage: werunos mount <letter> <diskNum|imagePath> [<partNum>]\n" +
-				"  example: werunos mount G: 0 1              (physical disk partition)\n" +
-				"  example: werunos mount G: testfs.img       (raw ext4 image file)\n",
+			"usage: werunos mount <letter> <diskNum|imagePath> [<partNum>]\n"+
+				"  example: werunos mount G: 0 1              (physical disk partition)\n"+
+				"  example: werunos mount G: testfs.img       (raw ext4/btrfs image file)\n",
 		)
 	}
 
@@ -151,12 +181,10 @@ func runMount() error {
 		mountPoint = strings.ToUpper(mountPoint) + ":"
 	}
 
-	// Only 3 positional args: werunos mount <letter> <path> → image file
 	if len(args) == 4 {
 		return runMountImage(mountPoint, args[3])
 	}
 
-	// 4 positional args: werunos mount <letter> <diskNum> <partNum>
 	diskNum, err := strconv.Atoi(args[3])
 	if err != nil {
 		return runMountImage(mountPoint, args[3])
@@ -171,8 +199,7 @@ func runMount() error {
 	f, err := os.OpenFile(diskPath, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf(
-			"failed to open disk %q: %w\n"+
-				"Ensure werunos is running as Administrator.",
+			"failed to open disk %q: %w\nEnsure werunos is running as Administrator.",
 			diskPath, err,
 		)
 	}
@@ -194,17 +221,11 @@ func runMount() error {
 		}
 	}
 	if target == nil {
-		return fmt.Errorf(
-			"partition %d not found on %s (run `werunos devices` to see available partitions)",
-			partNum, diskPath,
-		)
+		return fmt.Errorf("partition %d not found on %s", partNum, diskPath)
 	}
 
 	if target.Type != block.TypeLinuxData {
-		return fmt.Errorf(
-			"partition %d is %q - werunos only supports Linux ext4 partitions",
-			partNum, target.Type,
-		)
+		return fmt.Errorf("partition %d is %q - expected Linux filesystem", partNum, target.Type)
 	}
 
 	fmt.Printf("Partition %d: %s, offset %d bytes, size %d MiB\n",
@@ -214,84 +235,23 @@ func runMount() error {
 
 	pr := block.NewPartitionReader(f, target)
 	deviceID := fmt.Sprintf("%s_p%d", diskPath, partNum)
-	safeDev, err := vfs.NewSafeDevice(pr, deviceID)
+
+	filesys, err := openFilesystem(pr)
 	if err != nil {
-		return fmt.Errorf("failed to initialise safe device: %w", err)
-	}
-	fs, err := vfs.NewFileSystem(safeDev)
-	if err != nil {
-		return fmt.Errorf("failed to initialise ext4 filesystem: %w", err)
-	}
-
-	sb, err := fs.ReadSuperBlock()
-	if err != nil {
-		return fmt.Errorf("failed to read ext4 superblock: %w", err)
-	}
-
-	volName := string(bytes.Trim(sb.S_volume_name[:], "\x00"))
-	if volName == "" {
-
-		volName = "ext4"
-	}
-
-	volName = sanitizeVolName(volName)
-	fmt.Printf("ext4 volume: %q (sanitized), block size: %d bytes\n", volName, fs.BlockSize)
-
-	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN || fs.JournalNeedsRecovery() {
-		fmt.Println("→ Filesystem needs recovery (journal replay + orphan cleanup)...")
-		res := fs.Recover()
-		if res.JournalReplayed {
-			fmt.Printf("  ✓ Journal replayed: %d metadata blocks in %d transactions\n",
-				res.BlocksApplied, res.Transactions)
+		safeDev, safeErr := vfs.NewSafeDevice(pr, deviceID)
+		if safeErr != nil {
+			return fmt.Errorf("failed to detect filesystem: %w", err)
 		}
-		if res.OrphansCleaned > 0 {
-			fmt.Printf("  ✓ Orphan inodes cleaned: %d\n", res.OrphansCleaned)
+
+		ext4fs := ext4.New(safeDev)
+		if sbErr := ext4fs.ReadSuperBlock(); sbErr != nil {
+			return fmt.Errorf("not a supported filesystem (tried ext4, btrfs): %w", err)
 		}
-		if res.JournalSkipped != "" {
-			fmt.Printf("  ⚠ Journal skipped: %s\n", res.JournalSkipped)
-		}
-		if !res.JournalReplayed && res.OrphansCleaned == 0 {
-			fmt.Println("  (nothing needed)")
-		}
+		filesys = ext4fs
 	}
 
-	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN {
-		fmt.Printf(
-			"WARNING: filesystem state is 0x%04x (expected 0x0001 = CLEAN).\n",
-			sb.S_state,
-		)
-		if sb.S_state&(vfs.SUPERBLOCK_STATE_ERRORS|vfs.SUPERBLOCK_STATE_ORPHAN) != 0 {
-			fmt.Println("  This is normal after an unclean shutdown. Clearing state and proceeding.")
-			fs.ClearSuperblockErrors()
-		} else {
-			return fmt.Errorf("unrecognised filesystem state 0x%04x - cannot mount safely", sb.S_state)
-		}
-	}
-	fs.EnsureRecoveryFlagIsClear()
-
-	if err := fs.ReadGroupDescriptors(); err != nil {
-		return fmt.Errorf("failed to read block group descriptors: %w", err)
-	}
-
-	OrionFS := host.NewOrionFS(fs)
-	fuseSrv := fuse.NewFileSystemHost(OrionFS)
-
-	mountArgs := []string{
-		"-o", fmt.Sprintf("uid=-1,gid=-1,volname=%s", volName),
-	}
-	fmt.Printf("Mount args: %v\n", mountArgs)
-
-	fmt.Printf("\nMounting at %s … (press Ctrl+C or right-click → Eject to unmount)\n", mountPoint)
-	fmt.Println("Tip: to make this drive visible to ALL users, launch with: psexec -i -s werunos.exe mount ...")
-	fmt.Println()
-
-	ok := fuseSrv.Mount(mountPoint, mountArgs)
-	if !ok {
-		return fmt.Errorf("mount failed - ensure WinFsp is installed (https://winfsp.dev) and werunos is running as Administrator\nFor all-user visibility, run as SYSTEM: psexec -i -s werunos.exe mount ...")
-	}
-
-	fmt.Println("Unmounted successfully.")
-	return nil
+	fmt.Printf("Detected filesystem: %s\n", filesys.Type())
+	return mountFilesystem(filesys, mountPoint, filesys.Type())
 }
 
 func runMountImage(mountPoint, imagePath string) error {
@@ -301,75 +261,24 @@ func runMountImage(mountPoint, imagePath string) error {
 	}
 	defer f.Close()
 
-	fmt.Printf("Mode: raw ext4 image (%s)\n", imagePath)
+	fmt.Printf("Mode: raw image (%s)\n", imagePath)
 
-	safeDev, err := vfs.NewSafeDevice(f, imagePath)
+	filesys, err := openFilesystem(f)
 	if err != nil {
-		return fmt.Errorf("failed to initialise safe device: %w", err)
-	}
-
-	fs, err := vfs.NewFileSystem(safeDev)
-	if err != nil {
-		return fmt.Errorf("failed to initialise ext4 filesystem: %w", err)
-	}
-
-	sb, err := fs.ReadSuperBlock()
-	if err != nil {
-		return fmt.Errorf("failed to read ext4 superblock: %w", err)
-	}
-
-	volName := string(bytes.Trim(sb.S_volume_name[:], "\x00"))
-	if volName == "" {
-		volName = "ext4"
-	}
-	volName = sanitizeVolName(volName)
-	fmt.Printf("ext4 volume: %q (sanitized), block size: %d bytes\n", volName, fs.BlockSize)
-
-	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN || fs.JournalNeedsRecovery() {
-		fmt.Println("→ Filesystem needs recovery (journal replay + orphan cleanup)...")
-		res := fs.Recover()
-		if res.JournalReplayed {
-			fmt.Printf("  ✓ Journal replayed: %d metadata blocks in %d transactions\n",
-				res.BlocksApplied, res.Transactions)
+		safeDev, safeErr := vfs.NewSafeDevice(f, imagePath)
+		if safeErr != nil {
+			return fmt.Errorf("failed to detect filesystem: %w", err)
 		}
-		if res.OrphansCleaned > 0 {
-			fmt.Printf("  ✓ Orphan inodes cleaned: %d\n", res.OrphansCleaned)
+
+		ext4fs := ext4.New(safeDev)
+		if sbErr := ext4fs.ReadSuperBlock(); sbErr != nil {
+			return fmt.Errorf("not a supported filesystem (tried ext4, btrfs): %w", err)
 		}
-		if res.JournalSkipped != "" {
-			fmt.Printf("  ⚠ Journal skipped: %s\n", res.JournalSkipped)
-		}
-		if !res.JournalReplayed && res.OrphansCleaned == 0 {
-			fmt.Println("  (nothing needed)")
-		}
+		filesys = ext4fs
 	}
 
-	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN {
-		fmt.Printf("WARNING: filesystem state is 0x%04x (expected 0x0001 = CLEAN).\n", sb.S_state)
-		if sb.S_state&(vfs.SUPERBLOCK_STATE_ERRORS|vfs.SUPERBLOCK_STATE_ORPHAN) != 0 {
-			fmt.Println("  This is normal after an unclean shutdown. Clearing state and proceeding.")
-			fs.ClearSuperblockErrors()
-		} else {
-			return fmt.Errorf("unrecognised filesystem state 0x%04x", sb.S_state)
-		}
-	}
-	fs.EnsureRecoveryFlagIsClear()
-
-	if err := fs.ReadGroupDescriptors(); err != nil {
-		return fmt.Errorf("failed to read block group descriptors: %w", err)
-	}
-
-	hostFS := host.NewOrionFS(fs)
-	fuseSrv := fuse.NewFileSystemHost(hostFS)
-	mountArgs := []string{"-o", fmt.Sprintf("uid=-1,gid=-1,volname=%s", volName)}
-	fmt.Printf("\nMounting at %s … (press Ctrl+C or right-click → Eject to unmount)\n", mountPoint)
-
-	ok := fuseSrv.Mount(mountPoint, mountArgs)
-	if !ok {
-		return fmt.Errorf("mount failed - ensure WinFsp is installed")
-	}
-
-	fmt.Println("Unmounted successfully.")
-	return nil
+	fmt.Printf("Detected filesystem: %s\n", filesys.Type())
+	return mountFilesystem(filesys, mountPoint, filesys.Type())
 }
 
 func runFsck(devicePath string, fix bool) error {
@@ -466,23 +375,50 @@ func runFsckDevice(dev block.ReadWriterAt, fix bool) error {
 func runImageMode() error {
 	file, err := os.OpenFile("testfs.img", os.O_RDWR, 0)
 	if err != nil {
-		return fmt.Errorf("failed to open testfs.img: %w\n(Did you create it and unmount it in Linux?)", err)
+		return fmt.Errorf("failed to open testfs.img: %w", err)
 	}
 	defer file.Close()
 
 	fmt.Println("Mode: raw image (testfs.img)")
-	return readExt4(file)
+
+	filesys, err := openFilesystem(file)
+	if err != nil {
+		return fmt.Errorf("failed to detect filesystem: %w", err)
+	}
+
+	return readRootDir(filesys)
+}
+
+func readRootDir(filesys fs.FileSystem) error {
+	entries, err := filesys.Readdir("/")
+	if err != nil {
+		return fmt.Errorf("failed to read root directory: %w", err)
+	}
+
+	fmt.Printf("Filesystem type: %s\n", filesys.Type())
+	fmt.Printf("\nRoot directory listing (%d entries):\n", len(entries))
+	fmt.Printf("  %-6s  %-8s  %s\n", "type", "inode", "name")
+	fmt.Printf("  %-6s  %-8s  %s\n", "------", "--------", "----")
+	for _, e := range entries {
+		typeName := fs.DirFileTypeName[e.FileType]
+		fmt.Printf("  %-6s  %-8d  %s\n", typeName, e.Inode, e.Name)
+	}
+	return nil
 }
 
 func runImagePath(path string, f *os.File) error {
-	fmt.Printf("Mode: raw ext4 image (%s)\n", path)
-	return readExt4(f)
+	fmt.Printf("Mode: raw image (%s)\n", path)
+	filesys, err := openFilesystem(f)
+	if err != nil {
+		return fmt.Errorf("failed to detect filesystem: %w", err)
+	}
+	return readRootDir(filesys)
 }
 
 func runListPartitions(devicePath string) error {
 	f, err := os.Open(devicePath)
 	if err != nil {
-		return fmt.Errorf("failed to open %q: %w\n(On Linux, try running with sudo. On Windows, run as Administrator.)", devicePath, err)
+		return fmt.Errorf("failed to open %q: %w", devicePath, err)
 	}
 	defer f.Close()
 
@@ -528,13 +464,12 @@ func runReadPartition(devicePath string, partNum int) error {
 		}
 	}
 	if target == nil {
-		return fmt.Errorf("partition %d not found on %q (run `werunos %s` to list available partitions)",
-			partNum, devicePath, devicePath)
+		return fmt.Errorf("partition %d not found on %q", partNum, devicePath)
 	}
 
 	if target.Type != block.TypeLinuxData {
 		return fmt.Errorf(
-			"partition %d is %q, not a Linux filesystem - werunos only supports ext4",
+			"partition %d is %q, not a Linux filesystem",
 			partNum, target.Type,
 		)
 	}
@@ -543,58 +478,12 @@ func runReadPartition(devicePath string, partNum int) error {
 	fmt.Printf("  Offset: %d bytes, Size: %d MiB\n\n", target.StartOffset(), target.ByteSize()/(1024*1024))
 
 	pr := block.NewPartitionReader(f, target)
-	return readExt4(pr)
-}
-
-func readExt4(dev block.ReadWriterAt) error {
-	fs, err := vfs.NewFileSystem(dev)
+	filesys, err := openFilesystem(pr)
 	if err != nil {
-		return fmt.Errorf("failed to initialise filesystem: %w", err)
+		return fmt.Errorf("failed to detect filesystem: %w", err)
 	}
 
-	sb, err := fs.ReadSuperBlock()
-	if err != nil {
-		return fmt.Errorf("failed to read superblock: %w", err)
-	}
-
-	volName := string(bytes.Trim(sb.S_volume_name[:], "\x00"))
-	if volName == "" {
-		volName = "<unnamed>"
-	}
-
-	fmt.Printf("Mounted ext4 filesystem: %s\n", volName)
-	fmt.Printf("  Block size:    %d bytes\n", fs.BlockSize)
-	fmt.Printf("  Inodes:        %d\n", sb.S_inodes_count)
-	fmt.Printf("  Block groups:  %d\n", sb.BlockGroupCount())
-	fmt.Printf("  Descriptor sz: %d bytes\n", fs.DescSize)
-
-	if sb.S_state != vfs.SUPERBLOCK_STATE_CLEAN {
-		fmt.Printf("Note: filesystem state is 0x%04x (not CLEAN) - proceeding in read-only mode\n", sb.S_state)
-	}
-
-	if err := fs.ReadGroupDescriptors(); err != nil {
-		return fmt.Errorf("failed to read group descriptors: %w", err)
-	}
-
-	rootInode, err := fs.ReadRootInode()
-	if err != nil {
-		return fmt.Errorf("failed to read root inode: %w", err)
-	}
-
-	entries, err := fs.ReadDir(rootInode)
-	if err != nil {
-		return fmt.Errorf("failed to read root directory: %w", err)
-	}
-
-	fmt.Printf("\nRoot directory listing (%d entries):\n", len(entries))
-	fmt.Printf("  %-6s  %-8s  %s\n", "type", "inode", "name")
-	fmt.Printf("  %-6s  %-8s  %s\n", "------", "--------", "----")
-	for _, e := range entries {
-		typeName := vfs.DirFileTypeName[e.FileType]
-		fmt.Printf("  %-6s  %-8d  %s\n", typeName, e.Inode, e.Name)
-	}
-
-	return nil
+	return readRootDir(filesys)
 }
 
 func truncate(s string, n int) string {

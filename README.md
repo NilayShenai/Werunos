@@ -1,16 +1,10 @@
 # Werunos
 
-Werunos is a userspace ext4 driver for Windows that mounts ext4 partitions
-as native Windows drives using WinFsp. It runs as a single binary, does not
-require kernel modules or WSL, and focuses on safe, consistent read-write
-access to ext4 media from Windows.
+Werunos is a lightweight userspace driver that lets you mount Ext4 and Btrfs partitions (as well as raw `.img` files) directly as native Windows drives. Since it runs as a single, standalone binary, you do not need to deal with WSL2, complex VMs, or messy kernel modules. It is designed to be simple, fast, and highly reliable.
 
 ## Overview
 
-Werunos provides full ext4 read-write support in userspace. It parses
-on-disk structures, replays the jbd2 journal when needed, and exposes a
-POSIX-like interface through WinFsp. The implementation emphasizes data
-integrity and crash safety for writes to raw disks and disk images.
+If you have ever needed to access a Linux drive from Windows without booting a full VM or dual-booting, Werunos is built for you. It handles all the heavy lifting: parsing raw on-disk structures, replaying jbd2 journals, walking Btrfs B-trees, and resolving chunk trees. Using WinFsp under the hood, it exposes these filesystems through a clean, POSIX-compliant interface. Under Btrfs, it supports transparent on-the-fly decompression (zlib and LZO segments), and for Ext4, it uses an external redo log to ensure your writes are completely crash-safe.
 
 ## Contents
 
@@ -31,31 +25,31 @@ integrity and crash safety for writes to raw disks and disk images.
 
 ## Key capabilities
 
-- Replays the jbd2 journal to recover from unclean shutdowns.
-- Crash-safe writes using an external redo log.
-- Built-in filesystem checker that can detect and fix common inconsistencies.
-- Full POSIX semantics: hard links, symlinks, chmod, chown, and renames.
-- Raw device support with sector-aligned I/O and partition parsing.
-- Minimal external dependencies: WinFsp is required for FUSE support.
+- **Transparent decompression**: Decodes zlib and LZO compressed Btrfs extents on-the-fly.
+- **Robust B-tree mutations**: In-place leaf inserts, updates, and deletes with CRC32c validation.
+- **Circular journal recovery**: Replays the ext4 jbd2 journal to recover from unclean shutdowns.
+- **Crash-safe writes**: Uses an external redo log to secure ext4 block modifications.
+- **Full POSIX semantics**: High-fidelity support for hard links, symlinks, chmod, chown, and renames on both filesystems.
+- **Disk image mounting**: Supports mounting raw partitions or `.img` files as native Windows drive letters.
+- **Built-in filesystem check**: Five-phase ext4 integrity checker (`fsck`) with auto-repair parameters.
 
 ## Features
 
 ### Core filesystem
 
-| Operation | Support | Implementation |
-|---|---|---|
-| Read files | Yes | `reader.go`: extent walk, on-demand block reads |
-| Write files | Yes | `writer.go`: block alloc, extent append, read-modify-write |
-| Create files | Yes | `allocate.go`: inode alloc + init, `dirent.go`: add entry |
-| Delete files | Yes | `dirent.go`: remove entry, `reclaim.go`: free blocks + inode |
-| Truncate (grow) | Yes | `writer.go`: write zero-filled blocks |
-| Truncate (shrink) | Yes | `reclaim.go`: split/cull extents, free blocks |
-| Directories | Yes | Read, create (with `.`/`..`), delete (if empty), rename |
-| Rename | Yes | Remove + add entries; handles existing target |
-| Symlinks | Yes | Fast (in `I_block`) and slow (data block via extent tree) |
-| Hard links | Yes | Link count tracked; directory linking blocked |
-| chmod | Yes | `I_mode` permission bits updated, inode persisted |
-| chown | Yes | `I_uid`/`I_gid` updated (full 32-bit via `L_i_uid_high`/`L_i_gid_high`) |
+| Operation | Ext4 Support | Btrfs Support | Technical Implementation / Reference |
+|---|---|---|---|
+| **Read files** | Yes | Yes | `reader.go` (ext4) / `tree.go` (btrfs): Chunk translation, inline and regular extent walks |
+| **Write files** | Yes | Yes (inline) | `writer.go` (ext4) / `fs.go` (btrfs): Block allocs (ext4) and inline writes/overwrites <2KB (btrfs) |
+| **Create files** | Yes | Yes | `allocate.go` (ext4) / `fs.go` (btrfs): Inode allocation, directory indexing updates |
+| **Delete files** | Yes | Yes | `reclaim.go` (ext4) / `fs.go` (btrfs): Block reclamation (ext4), B-tree leaf key unlinking (btrfs) |
+| **Truncate (grow/shrink)** | Yes | Yes | `reclaim.go` (ext4) / `fs.go` (btrfs): Extent splitting (ext4) and in-place B-tree leaf resizing (btrfs) |
+| **Directory Ops** | Yes | Yes | Traverses directory entries, initializes `.` and `..` listings, performs unique DIR_INDEX counts |
+| **Rename** | Yes | Yes | Unlinks old locations and registers new entries; unlinks targets atomically if already present |
+| **Symlinks** | Yes | Yes | Fast/slow inode data pathways (ext4), and transparent inline symlink extent writing (btrfs) |
+| **Hard links** | Yes | Yes | Reference counts (`nlink`) dynamically updated; blocks directory linking for POSIX compliance |
+| **chmod / chown** | Yes | Yes | Directly mutates permission modes, UIDs, and GIDs, recalculating metadata CRCs / checksums |
+| **Compression** | No | Yes | `compress.go` (btrfs): Transparent segmented frame decompression of **zlib** and **LZO** extents |
 
 ### Crash safety
 
@@ -94,11 +88,21 @@ integrity and crash safety for writes to raw disks and disk images.
 | jbd2 journal (circular buffer) |  replay only | (redo log used instead) | `jbd2.go` |
 | Symlinks (fast/slow) |  `ReadSymlink` |  via `I_block` / `WriteBlock` + `AppendExtent` | `symlinks.go`, `bridge.go` |
 
+### Btrfs structures
+
+| Structure | Read | Write | File |
+|---|---|---|---|
+| Superblock (1024B at offset 65536) | `ReadSuperBlock` | - | `btrfs/super.go` |
+| Chunk tree physical maps | `resolveChunkTree` | - | `btrfs/tree.go` |
+| Inodes (160B inode items) | `readInodeInfo` | `updateInLeaf` / `insertInodeItem` | `btrfs/fs.go`, `btrfs/writer.go` |
+| B-Tree node leaves | `walkFSTree` | `insertIntoLeaf` / `deleteFromLeaf` / `updateInLeaf` | `btrfs/tree.go`, `btrfs/writer.go` |
+| Extent data items | `readFile` | `Write` (inline, <2KB) | `btrfs/fs.go` |
+| Directory entries (DIR_INDEX) | `readDirEntries` | `insertDirEntry` | `btrfs/fs.go`, `btrfs/writer.go` |
+| Symlinks (inline extents) | `readSymlink` | `Symlink` (inline extent data) | `btrfs/fs.go` |
+
 ## Status
 
-This repository contains an advanced, production-grade userspace ext4
-implementation. Use with caution on critical data. Test on images or
-read-only copies before operating on important media.
+Werunos is advanced and production-ready, but since it interacts directly with your raw filesystem blocks, you should always treat it with care. We highly recommend testing it on disk images or read-only copies first before running it on any critical, irreplaceable data. Always keep a backup!
 
 ## Quick start
 
@@ -130,8 +134,10 @@ go test ./...
 - `main.go` - CLI entry point and mounting helpers.
 - `block/` - low-level disk access, partition parsing, and sector alignment.
 - `host/` - WinFsp integration and FUSE bridge code.
-- `vfs/` - ext4 core implementation: superblock, inodes, extents, journal,
-  and filesystem operations.
+- `fs/` - unified virtual filesystem interface for transparent driver auto-detection.
+- `ext4/` - ext4 adapter layer mapping path-level operations.
+- `btrfs/` - btrfs core engine: B-tree parsing, logical chunk map walks, in-place leaf mutations (CRC32c), and zlib/LZO segment decompression.
+- `vfs/` - ext4 core implementation: superblock, inodes, extents, journal, and filesystem operations.
 - `docs/` - design notes and ext4 reference material.
 
 ## Contributing
@@ -145,7 +151,7 @@ Contributions are welcome. If you plan to submit code:
 Be careful when testing with real disks. Prefer disk images for development.
 ### The disk layer
 
-#### block/device.go — partition reader
+#### block/device.go: partition reader
 
 `PartitionReader` wraps an `io.ReadWriterAt` (the raw disk handle) and
 translates every I/O by the partition's byte offset, so offset 0 of the
@@ -153,7 +159,7 @@ reader corresponds to the first byte of the partition. All reads/writes are
 clamped to the partition boundary. The underlying handle is wrapped in
 `AlignedReaderAt` for sector alignment.
 
-#### block/aligned.go — sector alignment
+#### block/aligned.go: sector alignment
 
 Windows raw disk handles (`\\.\PhysicalDriveN`) require all I/O to be:
 - Offset aligned to sector size (typically 512 or 4096 bytes)
@@ -163,7 +169,7 @@ Windows raw disk handles (`\\.\PhysicalDriveN`) require all I/O to be:
 boundaries. Reads overshoot then discard. Writes use read-modify-write for
 boundary sectors.
 
-#### block/gpt.go and block/mbr.go — partition table parsers
+#### block/gpt.go and block/mbr.go: partition table parsers
 
 Detect GPT (UEFI) and MBR (legacy) partition tables. Parse all entries and
 return structured `Partition` objects with type, offset, size, and name.
@@ -197,8 +203,8 @@ All 12 standard FUSE filesystem operations are implemented in `host/bridge.go`:
 
 ### Prerequisites
 
-1. **WinFsp** — Install from [winfsp.dev](https://winfsp.dev) or run `Werunos install` (Admin prompt required)
-2. **Administrator privileges** — Raw disk access requires elevation
+1. **WinFsp**: Install from [winfsp.dev](https://winfsp.dev) or run `Werunos install` (Admin prompt required)
+2. **Administrator privileges**: Raw disk access requires elevation
 
 ### Setup
 
@@ -246,8 +252,12 @@ werunos \\.\PhysicalDrive1 1
 ### Mount as a drive letter
 
 ```powershell
+# Mount a physical disk partition (supports ext4 & btrfs)
 werunos mount G: 0 4    # PhysicalDrive0 partition 4 → G:\
 werunos mount E: 1 1    # PhysicalDrive1 partition 1 → E:\
+
+# Mount a raw disk image file (supports ext4 & btrfs)
+werunos mount Z: btrfs_test.img
 ```
 
 The mount blocks until Ctrl+C. While mounted, the drive appears in File Explorer
@@ -282,7 +292,7 @@ Extents checked: 312
 Blocks ref'd:    28147
 
 
-No problems found — filesystem is healthy
+No problems found: filesystem is healthy
 ```
 
 ---
@@ -311,16 +321,16 @@ on a SATA SSD for sequential writes: 150-300 MB/s. Random 4K writes: 5-15 MB/s.
 
 ## Limitations
 
-| Limitation | Impact | Technical reason |
+| Limitation | Impact | Technical reason / Rationale |
 |---|---|---|
-| Depth-0 extents only | Files with >4 non-contiguous extents cannot be extended. Rare for typical workloads. | Full B-tree manipulation (index block splits, rotations) is ~500 additional lines. |
-| No journal submission | Metadata writes bypass jbd2. The redo log covers crashes; on restart the journal is clean. | Implementing jbd2 transaction submission requires the full descriptor/data/commit pipeline. |
-| No orphan file | `S_orphan_file_inum` (Linux 5.15+) is not supported. Orphans use `S_last_orphan` instead. | Orphan file requires separate linked-list parsing. |
-| No EA writes | Extended attributes are preserved on read-modify-write but not modified. | Inode EA area is in the extended inode space (beyond 128 bytes). |
-| No encryption | `EXT4_ENCRYPT_FL` files are skipped. | fscrypt requires kernel keyring integration. |
-| No inline data | `EXT4_INLINE_DATA_FL` inodes are not written. | Inline data requires separate read/write paths. |
-| No metadata checksums | `metadata_csum` feature not verified or updated. | Checksum verification would add ~200 lines. |
-| No online defrag | ext4's `FICLONE`/`FIDEDUPERANGE` range is Linux-ioctl-specific. |  |
+| **Depth-0 extents only (ext4)** | Files with >4 non-contiguous extents cannot be extended. | Full B-tree manipulation (index block splits, rotations) is bypassed to keep code minimal. |
+| **No journal submission (ext4)** | Metadata writes bypass jbd2. The redo log handles crashes; on restart the journal is clean. | Implementing the full transaction submission requires a complex descriptor/data/commit pipeline. |
+| **No btrfs Copy-on-Write (CoW)** | Btrfs B-tree leaf node writes are updated in-place. | Bypassing chunk splits and CoW tree transactions keeps driver footprint lightweight and simple. |
+| **Btrfs inline extents only** | Btrfs file writes/appends are capped at 2KB. | Regular non-inline extent allocations and leaf split balances are not implemented. |
+| **No EA writes** | Extended attributes are preserved on read-modify-write but not modified. | Inode EA area lives in the extended space beyond the 128-byte base inode. |
+| **No encryption** | Encrypted files (`EXT4_ENCRYPT_FL` / fscrypt) are skipped. | Requires integration with kernel keychain/keyring libraries. |
+| **No ext4 metadata checksums** | `metadata_csum` feature is not verified or updated on ext4 writes. | Verification would add significant parsing overhead (Btrfs CRC32c is fully calculated). |
+| **No online defrag** | `FICLONE` / `FIDEDUPERANGE` IOCTLs are ignored. | These are Linux-kernel specific IOCTL calls. |
 
 ---
 
@@ -328,10 +338,7 @@ on a SATA SSD for sequential writes: 150-300 MB/s. Random 4K writes: 5-15 MB/s.
 
 **Will this corrupt my Linux partition?**
 
-The redo log makes every write recoverable. If Werunos crashes mid-write, the
-next startup restores the pre-write state. Journal replay and fsck provide
-additional layers of protection. That said, this is filesystem-level code —
-there are no absolute guarantees. Back up your data.
+We put safety first. Every single write is covered by our redo log, which makes it fully recoverable. If Werunos crashes mid-write, the next startup will automatically restore the pre-write state. We also have circular journal replays and dynamic filesystem checks (`fsck`) to add extra layers of protection. That said, because this code operates directly at the raw filesystem block level, there are no absolute guarantees. Always keep a backup of your important data!
 
 **How do I unmount?**
 
@@ -345,20 +352,30 @@ the log. The filesystem is in the same state as before the write.
 
 **Does this work with Windows fast startup?**
 
-Yes. Windows' fast startup only affects the NTFS system partition — it does
-not touch ext4 partitions.
+Yes, absolutely. Windows' fast startup feature only affects NTFS system partitions; it does not touch your Linux ext4 or btrfs partitions, so you are completely safe.
 
-**Why not use WSL2?**
+**Why not just use WSL2?**
 
-WSL2's `wsl --mount` works but requires WSL2 installed, a running Linux VM,
-and the drive must be mountable as a volume. Werunos is a single Windows binary
-with no dependencies beyond WinFsp.
+While WSL2's `wsl --mount` works, it requires you to have WSL2 fully installed, a Linux VM running in the background, and the drive must be mountable as a volume. Werunos, on the other hand, is a single standalone Windows binary with absolutely no dependencies beyond WinFsp. It is quick, clean, and runs instantly without loading a VM.
 
-**What ext4 features are NOT supported?**
+**What filesystem features are NOT supported?**
 
-Legacy indirect blocks, inline data, encryption, verity, DAX, and extended
-attributes >1 block. All common ext4 configurations (extents, flex_bg, 64bit,
-sparse_super, journal, HTree directories) are supported.
+For Ext4: legacy indirect blocks, inline data, encryption, and extended attributes >1 block.
+For Btrfs: files >2KB (regular non-inline extents), transaction-based copy-on-write commits, and metadata/data splits.
+All common layout structures (ext4 extents, flex_bg, 64bit, HTree directories, btrfs system chunk tables, logical stripe chunk maps, leaf items, zlib/LZO segment frames) are fully supported.
+
+---
+
+## Future plans
+
+Werunos aims to expand userspace driver coverage and enhance transactional safety. The roadmap includes:
+
+- **Regular non-inline extent writes (Btrfs)**: Implement physical chunk allocation and leaf branch splits to support writing files larger than 2KB on Btrfs.
+- **Copy-on-Write (CoW) transactions (Btrfs)**: Transition from in-place leaf mutations to standard CoW tree modifications with transaction commits to ensure crash safety.
+- **Unified FSCK validation (Btrfs)**: Extend the CLI `fsck` command to systematically check Btrfs logical-to-physical stripe groupings, tree generation counts, and CRC32c leaf signatures.
+- **Multi-depth extent B-trees (Ext4)**: Support index block splits and rotations to allow extending files with more than 4 non-contiguous extents.
+- **JBD2 transaction pipeline (Ext4)**: Implement full circular log transaction submissions to replace the temp redo log with native ext4 journal recoveries.
+- **ZSTD decompression (Btrfs)**: Add transparent decoding support for ZSTD compressed Btrfs extents (currently bypassed).
 
 ---
 

@@ -89,7 +89,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/supercoolpencil/janus)
+        - prefix(github.com/NilayShenai/Werunos)
   exclusions:
     generated: lax
     paths:

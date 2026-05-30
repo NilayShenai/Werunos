@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Werunos</title>
+<title>Werunos — Userspace Ext4 & Btrfs Driver for Windows</title>
+<meta name="description" content="A robust userspace Ext4 and Btrfs filesystem driver for Windows utilizing WinFsp. Experience POSIX-compliant read-write operations, zlib/LZO decompression, crash-safe redo logs, and physical disk/raw image mounting natively.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -16,7 +17,7 @@
 <header class="masthead">
   <div class="masthead-inner">
     <h1 class="project-name">W E R U N O S</h1>
-    <p class="project-sub">A userspace ext4 driver for Windows</p>
+    <p class="project-sub">A userspace ext4 & btrfs driver for Windows</p>
     <p class="project-meta-line">
       <span>Go 1.26</span>
       <span class="meta-dot">&middot;</span>
@@ -30,25 +31,49 @@
   </div>
 </header>
 
-<div class="layout-card">
-  <div class="layout-title">ext4 volume layout</div>
-  <div class="layout-bar">
-    <span class="layout-seg seg-boot"></span>
-    <span class="layout-seg seg-super"></span>
-    <span class="layout-seg seg-group"></span>
-    <span class="layout-seg seg-data"></span>
+<div class="split" style="margin-bottom: 2.5rem;">
+  <div class="layout-card">
+    <div class="layout-title">ext4 volume layout</div>
+    <div class="layout-bar">
+      <span class="layout-seg seg-boot" style="width: 15%;"></span>
+      <span class="layout-seg seg-super" style="width: 10%;"></span>
+      <span class="layout-seg seg-group" style="width: 15%;"></span>
+      <span class="layout-seg seg-data" style="width: 60%;"></span>
+    </div>
+    <div class="layout-legend">
+      <span><i class="legend-swatch swatch-boot"></i>Boot sector</span>
+      <span><i class="legend-swatch swatch-super"></i>Superblock</span>
+      <span><i class="legend-swatch swatch-group"></i>Group descriptors</span>
+      <span><i class="legend-swatch swatch-data"></i>Block groups</span>
+    </div>
+    <div class="layout-addr">
+      <span style="width: 15%;">0x0000</span>
+      <span style="width: 10%;">0x0400</span>
+      <span style="width: 15%;">0x0800</span>
+      <span style="width: 60%;">0x1000+</span>
+    </div>
   </div>
-  <div class="layout-legend">
-    <span><i class="legend-swatch swatch-boot"></i>Boot sector</span>
-    <span><i class="legend-swatch swatch-super"></i>Superblock</span>
-    <span><i class="legend-swatch swatch-group"></i>Group descriptors</span>
-    <span><i class="legend-swatch swatch-data"></i>Block groups</span>
-  </div>
-  <div class="layout-addr">
-    <span>0x0000</span>
-    <span>0x0400</span>
-    <span>0x0800</span>
-    <span>0x1000+</span>
+
+  <div class="layout-card">
+    <div class="layout-title">btrfs volume layout</div>
+    <div class="layout-bar">
+      <span class="layout-seg seg-btrfs-boot" style="width: 15%;"></span>
+      <span class="layout-seg seg-btrfs-super" style="width: 10%;"></span>
+      <span class="layout-seg seg-btrfs-chunk" style="width: 25%;"></span>
+      <span class="layout-seg seg-btrfs-tree" style="width: 50%;"></span>
+    </div>
+    <div class="layout-legend">
+      <span><i class="legend-swatch swatch-btrfs-boot"></i>Reserved space</span>
+      <span><i class="legend-swatch swatch-btrfs-super"></i>Superblock</span>
+      <span><i class="legend-swatch swatch-btrfs-chunk"></i>System chunks</span>
+      <span><i class="legend-swatch swatch-btrfs-tree"></i>B-Tree chunks</span>
+    </div>
+    <div class="layout-addr">
+      <span style="width: 15%;">0x0000</span>
+      <span style="width: 10%;">0x10000</span>
+      <span style="width: 25%;">0x11000</span>
+      <span style="width: 50%;">logical maps</span>
+    </div>
   </div>
 </div>
 
@@ -59,22 +84,15 @@
     <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0001</div>
     <h2 class="ch-title">Overview</h2>
     <p class="ch-text">
-      Werunos provides full ext4 read-write support in userspace. It parses
-      on-disk structures, replays the jbd2 journal when needed, and exposes a
-      POSIX-like interface through WinFsp. The implementation emphasizes data
-      integrity and crash safety for writes to raw disks and disk images.
+      Werunos provides high-performance ext4 and btrfs read-write support in userspace. It mounts
+      volumes directly as native Windows drives via WinFsp, utilizing structured B-tree walks, logical-to-physical chunk translation, and transparent compression segment decoding without any kernel modules.
     </p>
     <p class="ch-text">
-      Every ext4 filesystem is composed of block groups. Each group contains
-      a block bitmap, an inode bitmap, an inode table, and data blocks.
-      Werunos navigates this structure directly, reading and writing the
-      superblock, group descriptors, inodes, extent trees, and directory
-      entries at the block level.
+      While maintaining lightweight ext4 mounts, Werunos features a complete userspace Btrfs engine. It decodes the superblock system chunk array, resolves complex chunk trees, performs in-place leaf mutations (insert, update, and delete), and supports transparent on-the-fly decompressions for <strong>zlib</strong> and <strong>LZO</strong> extents.
     </p>
     <aside class="ch-note">
       <span class="note-indicator">&#x25C6;</span>
-      jbd2 journal replay, crash-safe redo log, and a 5-phase fsck
-      are built into the driver itself.
+      Btrfs support includes custom leaf restructuring algorithms, CRC32c checksum recalculation, symbolic and hard link creation, and direct raw disk image (`.img`) mounts.
     </aside>
   </section>
 
@@ -100,8 +118,16 @@
             <div class="arch-comp-info">superblock, inodes, extents, directories, symlinks</div>
           </div>
           <div class="arch-comp">
+            <div class="arch-comp-name">btrfs engine</div>
+            <div class="arch-comp-info">logical translation, B-tree walking, zlib/lzo decompression</div>
+          </div>
+          <div class="arch-comp">
             <div class="arch-comp-name">jbd2 journal</div>
             <div class="arch-comp-info">replay engine, orphan cleanup, recovery flag</div>
+          </div>
+          <div class="arch-comp">
+            <div class="arch-comp-name">B-tree writer</div>
+            <div class="arch-comp-info">leaf insert, delete, and update primitives</div>
           </div>
           <div class="arch-comp">
             <div class="arch-comp-name">redo log</div>
@@ -122,41 +148,82 @@
   </section>
 </div>
 
-<div class="superblock-card">
-  <div class="sb-header">ext4 superblock</div>
-  <div class="sb-grid">
-    <div class="sb-item">
-      <div class="sb-label">magic</div>
-      <div class="sb-value">0xEF53</div>
+<div class="split" style="margin-bottom: 4rem;">
+  <div class="superblock-card" style="margin-bottom: 0;">
+    <div class="sb-header">ext4 superblock</div>
+    <div class="sb-grid">
+      <div class="sb-item">
+        <div class="sb-label">magic</div>
+        <div class="sb-value">0xEF53</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">volume</div>
+        <div class="sb-value">Werunos</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">blocks</div>
+        <div class="sb-value">262144</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">inodes</div>
+        <div class="sb-value">65536</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">bsize</div>
+        <div class="sb-value">4096</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">groups</div>
+        <div class="sb-value">8</div>
+      </div>
+      <div class="sb-item sb-wide">
+        <div class="sb-label">features</div>
+        <div class="sb-value sb-features">
+          <span class="sb-chip">extents</span>
+          <span class="sb-chip">flex_bg</span>
+          <span class="sb-chip">64bit</span>
+          <span class="sb-chip">sparse_super</span>
+          <span class="sb-chip">journal</span>
+        </div>
+      </div>
     </div>
-    <div class="sb-item">
-      <div class="sb-label">volume</div>
-      <div class="sb-value">Werunos</div>
-    </div>
-    <div class="sb-item">
-      <div class="sb-label">blocks</div>
-      <div class="sb-value">262144</div>
-    </div>
-    <div class="sb-item">
-      <div class="sb-label">inodes</div>
-      <div class="sb-value">65536</div>
-    </div>
-    <div class="sb-item">
-      <div class="sb-label">bsize</div>
-      <div class="sb-value">4096</div>
-    </div>
-    <div class="sb-item">
-      <div class="sb-label">groups</div>
-      <div class="sb-value">8</div>
-    </div>
-    <div class="sb-item sb-wide">
-      <div class="sb-label">features</div>
-      <div class="sb-value sb-features">
-        <span class="sb-chip">extents</span>
-        <span class="sb-chip">flex_bg</span>
-        <span class="sb-chip">64bit</span>
-        <span class="sb-chip">sparse_super</span>
-        <span class="sb-chip">journal</span>
+  </div>
+
+  <div class="superblock-card" style="margin-bottom: 0;">
+    <div class="sb-header">btrfs superblock</div>
+    <div class="sb-grid">
+      <div class="sb-item">
+        <div class="sb-label">magic</div>
+        <div class="sb-value">0x4D5F5366...</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">volume</div>
+        <div class="sb-value">BtrfsVol</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">total_bytes</div>
+        <div class="sb-value">268435456</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">nodesize</div>
+        <div class="sb-value">16384</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">sectorsize</div>
+        <div class="sb-value">4096</div>
+      </div>
+      <div class="sb-item">
+        <div class="sb-label">devices</div>
+        <div class="sb-value">1</div>
+      </div>
+      <div class="sb-item sb-wide">
+        <div class="sb-label">features</div>
+        <div class="sb-value sb-features">
+          <span class="sb-chip">mixed-bg</span>
+          <span class="sb-chip">skinny-metadata</span>
+          <span class="sb-chip">compress-lzo</span>
+          <span class="sb-chip">compress-zlib</span>
+        </div>
       </div>
     </div>
   </div>
@@ -167,54 +234,98 @@
   <h2 class="ch-title">Capabilities</h2>
 
   <div class="cap-grid">
-    <div class="cap-group">
-      <h3 class="cap-group-title">Operations</h3>
-      <ul class="cap-list">
-        <li>read</li>
-        <li>write</li>
-        <li>create</li>
-        <li>delete</li>
-        <li>rename</li>
-        <li>truncate (grow / shrink)</li>
-        <li>chmod</li>
-        <li>chown</li>
-        <li>hard link</li>
-        <li>symlink (fast / slow)</li>
-        <li>mkdir / rmdir</li>
-        <li>readdir</li>
-      </ul>
+    <!-- Full-Width Comparison Matrix -->
+    <div class="cap-group matrix-group" style="grid-column: 1 / -1; margin-bottom: 1rem;">
+      <h3 class="cap-group-title">Ext4 & Btrfs Feature Comparison Matrix</h3>
+      <div class="matrix-table-wrapper">
+        <table class="matrix-tbl">
+          <thead>
+            <tr>
+              <th>Operation</th>
+              <th class="text-center">Ext4 Support</th>
+              <th class="text-center">Btrfs Support</th>
+              <th>Technical Implementation / Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="b-term">File Reading</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Ext4: extent B-tree walk, block caching. Btrfs: inline/regular extents, chunk tree logical maps.</td>
+            </tr>
+            <tr>
+              <td class="b-term">File Writing</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes <span class="status-warning">(Inline)</span></td>
+              <td>Ext4: full block allocator, extent appending. Btrfs: inline extent updates/writes (up to 2KB).</td>
+            </tr>
+            <tr>
+              <td class="b-term">Directory Ops</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Creating directories (with <code>.</code>/<code>..</code>), readdir traversal, directory entry unlinking.</td>
+            </tr>
+            <tr>
+              <td class="b-term">File Creation / Deletion</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Ext4: inode allocation, group block reclaim. Btrfs: inode generation, leaf deletion of index/item keys.</td>
+            </tr>
+            <tr>
+              <td class="b-term">Chmod / Chown</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Mutates permission mode, uid, and gid bits, recalculating CRCs/checksums dynamically.</td>
+            </tr>
+            <tr>
+              <td class="b-term">File Truncation</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Supports resizing files (grow / shrink). Ext4: extent tree splitting. Btrfs: in-place leaf updates.</td>
+            </tr>
+            <tr>
+              <td class="b-term">Links (Hard & Sym)</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Symlinks (fast/slow pathways). Hard links update link counts and references.</td>
+            </tr>
+            <tr>
+              <td class="b-term">Compression Support</td>
+              <td class="text-center status-no">&#x2718; No</td>
+              <td class="text-center status-yes">&#x2714; Yes</td>
+              <td>Btrfs: transparent on-the-fly decompression of <strong>zlib</strong> and <strong>LZO</strong> extents.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
+
+    <!-- Crash Safety -->
     <div class="cap-group">
       <h3 class="cap-group-title">Crash Safety</h3>
       <ul class="cap-list">
-        <li>jbd2 journal replay</li>
-        <li>orphan inode cleanup</li>
-        <li>external redo log</li>
-        <li>superblock flush on unmount</li>
-        <li>graceful fallback on replay failure</li>
-        <li>recovery flag auto-clear</li>
+        <li>jbd2 journal replay (ext4)</li>
+        <li>orphan inode cleanup (ext4)</li>
+        <li>external redo log (ext4)</li>
+        <li>superblock flush on unmount (both)</li>
+        <li>graceful fallback on replay failure (ext4)</li>
+        <li>recovery flag auto-clear (ext4)</li>
+        <li>atomic leaf mutations with checksum updates (btrfs)</li>
       </ul>
     </div>
+
+    <!-- Integrity & Devices -->
     <div class="cap-group">
-      <h3 class="cap-group-title">Integrity</h3>
+      <h3 class="cap-group-title">Integrity & Partitions</h3>
       <ul class="cap-list">
-        <li>5-phase fsck</li>
-        <li>block bitmap verification</li>
-        <li>inode bitmap verification</li>
-        <li>inode structure validation</li>
-        <li>superblock count reconciliation</li>
-        <li>directory structure checks</li>
-        <li>auto-repair (--fix flag)</li>
-      </ul>
-    </div>
-    <div class="cap-group">
-      <h3 class="cap-group-title">Partition Support</h3>
-      <ul class="cap-list">
-        <li>GPT partition tables</li>
-        <li>MBR partition tables</li>
-        <li>raw disk images</li>
-        <li>sector-aligned I/O</li>
-        <li>PhysicalDrive raw access</li>
+        <li>5-phase fsck (ext4)</li>
+        <li>bitmap & block verification (ext4)</li>
+        <li>auto-repair with <code>--fix</code> flag (ext4)</li>
+        <li>B-tree CRC32c checksum validation (btrfs)</li>
+        <li>GPT & MBR partition tables</li>
+        <li>raw disk images (both <code>.img</code> files)</li>
+        <li>sector-aligned physical disk I/O</li>
       </ul>
     </div>
   </div>
@@ -234,28 +345,39 @@
 │   ├── <span class="t-f">mbr.go</span>             MBR parser
 │   └── <span class="t-f">enum_windows.go</span>    Windows disk enumeration
 ├── <span class="t-d">host/</span>
-│   ├── <span class="t-f">bridge.go</span>          WinFsp FUSE bridge (12 ops)
+│   ├── <span class="t-f">bridge.go</span>          WinFsp FUSE bridge (16 ops)
 │   └── <span class="t-f">handles.go</span>         file/dir handle tables
+├── <span class="t-d">fs/</span>
+│   └── <span class="t-f">fs.go</span>              unified FileSystem interface
+├── <span class="t-d">ext4/</span>
+│   └── <span class="t-f">fs.go</span>              ext4 FileSystem adapter wrapper
+├── <span class="t-d">btrfs/</span>
+│   ├── <span class="t-f">super.go</span>           superblock & sys chunk parsing
+│   ├── <span class="t-f">tree.go</span>            B-tree walks & logical translation
+│   ├── <span class="t-f">types.go</span>           node, key, leaf structures
+│   ├── <span class="t-f">compress.go</span>        zlib & LZO decompression segment decoding
+│   ├── <span class="t-f">writer.go</span>          leaf insert/update/delete primitives
+│   └── <span class="t-f">fs.go</span>              btrfs FileSystem adapter (16 ops)
 ├── <span class="t-d">vfs/</span>
-│   ├── <span class="t-f">core.go</span>            FileSystem, Walk, ReadWriterAt
-│   ├── <span class="t-f">super.go</span>           Superblock (311 lines)
+│   ├── <span class="t-f">core.go</span>            ext4 Walk, core mapping
+│   ├── <span class="t-f">super.go</span>           Superblock definitions
 │   ├── <span class="t-f">bgdesc.go</span>          Block group descriptors
 │   ├── <span class="t-f">inodes.go</span>          Inode read/write
-│   ├── <span class="t-f">extents.go</span>         Extent tree (depth-0)
+│   ├── <span class="t-f">extents.go</span>         Extent B-tree walks
 │   ├── <span class="t-f">directory.go</span>       Directory reading
 │   ├── <span class="t-f">dirent.go</span>          Entry add/remove
-│   ├── <span class="t-f">allocate.go</span>        Block and inode allocator
+│   ├── <span class="t-f">allocate.go</span>        Block/inode allocator
 │   ├── <span class="t-f">reclaim.go</span>         Block/inode freeing
 │   ├── <span class="t-f">writer.go</span>          File writing, extent append
 │   ├── <span class="t-f">reader.go</span>          File reading, extent walk
-│   ├── <span class="t-f">jbd2.go</span>            Journal replay (296 lines)
-│   ├── <span class="t-f">redolog.go</span>         Crash-safe redo log (198 lines)
+│   ├── <span class="t-f">jbd2.go</span>            Journal replay engine
+│   ├── <span class="t-f">redolog.go</span>         Crash-safe redo log
 │   ├── <span class="t-f">symlinks.go</span>        Fast/slow symlink resolution
-│   └── <span class="t-f">health.go</span>          fsck implementation (392 lines)
+│   └── <span class="t-f">health.go</span>          fsck implementation
 └── <span class="t-d">docs/</span>
     └── <span class="t-d">ext4/</span> (28 files)   ext4 on-disk reference</pre>
   <figcaption class="fig-cap">
-    ~5000 lines of Go. Single external dependency: github.com/winfsp/cgofuse.
+    ~6000 lines of Go. Single external dependency: github.com/winfsp/cgofuse.
   </figcaption>
 </section>
 
@@ -278,10 +400,23 @@
       <code class="cmd-code">werunos mount &lt;letter&gt; &lt;disk&gt; &lt;part&gt;</code>
       <button class="cmd-copy" data-cmd="werunos mount <letter> <disk> <part>" aria-label="Copy command">&#x29C9;</button>
     </div>
-    <p class="cmd-desc">Mount an ext4 partition as a Windows drive letter. Blocks until Ctrl+C.</p>
+    <p class="cmd-desc">Mount an ext4 or btrfs physical partition as a Windows drive letter. Blocks until Ctrl+C.</p>
     <div class="cmd-example">
       <span class="cmd-example-label">example</span>
       <code>werunos mount G: 0 4</code>
+    </div>
+  </div>
+
+  <div class="cmd">
+    <span class="cmd-tag">mount image</span>
+    <div class="cmd-block">
+      <code class="cmd-code">werunos mount &lt;letter&gt; &lt;imagePath&gt;</code>
+      <button class="cmd-copy" data-cmd="werunos mount <letter> <imagePath>" aria-label="Copy command">&#x29C9;</button>
+    </div>
+    <p class="cmd-desc">Mount a raw ext4 or btrfs disk image file directly as a Windows drive letter.</p>
+    <div class="cmd-example">
+      <span class="cmd-example-label">example</span>
+      <code>werunos mount Z: btrfs_test.img</code>
     </div>
   </div>
 
@@ -291,7 +426,7 @@
       <code class="cmd-code">werunos fsck [--fix] &lt;device&gt; [&lt;part&gt;]</code>
       <button class="cmd-copy" data-cmd="werunos fsck [--fix] <device> [<part>]" aria-label="Copy command">&#x29C9;</button>
     </div>
-    <p class="cmd-desc">5-phase integrity check across block bitmaps, inode bitmaps, inode structures, superblock counts, and directory entries. Pass <code>--fix</code> to auto-correct mismatched counts.</p>
+    <p class="cmd-desc">5-phase integrity check across block bitmaps, inode bitmaps, inode structures, superblock counts, and directory entries (ext4 only). Pass <code>--fix</code> to auto-correct mismatched counts.</p>
     <div class="cmd-example">
       <span class="cmd-example-label">example</span>
       <code>werunos fsck --fix \\.\PhysicalDrive0 4</code>
@@ -313,7 +448,7 @@
       <code class="cmd-code">werunos &lt;device&gt; [&lt;part&gt;]</code>
       <button class="cmd-copy" data-cmd="werunos <device> [<part>]" aria-label="Copy command">&#x29C9;</button>
     </div>
-    <p class="cmd-desc">Without a subcommand, probe partitions on a device or list the root directory of an ext4 volume.</p>
+    <p class="cmd-desc">Without a subcommand, probe partitions on a device or list the root directory of an ext4/btrfs volume.</p>
     <div class="cmd-example">
       <span class="cmd-example-label">example</span>
       <code>werunos testfs.img</code>
@@ -323,8 +458,7 @@
   <aside class="ch-note cmd-note">
     <span class="note-indicator">&#x25C6;</span>
     Raw disk paths on Windows take the form <code>\\.\PhysicalDriveN</code>.
-    Werunos replays the jbd2 journal and clears the recovery flag automatically
-    on first mount after an unclean shutdown.
+    Werunos automatically auto-detects filesystem types at runtime.
   </aside>
 </section>
 
@@ -344,13 +478,23 @@
       <tbody>
         <tr>
           <td class="b-term">Depth-0 extents</td>
-          <td>Files with &gt;4 non-contiguous extents cannot extend</td>
+          <td>Files with &gt;4 non-contiguous extents cannot extend (ext4)</td>
           <td>Full B-tree manipulation is ~500 additional lines</td>
         </tr>
         <tr>
           <td class="b-term">No journal submission</td>
-          <td>Metadata writes bypass jbd2; redo log covers crashes</td>
+          <td>Metadata writes bypass jbd2; redo log covers crashes (ext4)</td>
           <td>jbd2 transaction pipeline requires descriptor/data/commit</td>
+        </tr>
+        <tr>
+          <td class="b-term">No btrfs CoW</td>
+          <td>Leaf node writes updated in-place; bypasses transaction commits</td>
+          <td>Crash-unsafe but lightweight, keeping tree structures simple</td>
+        </tr>
+        <tr>
+          <td class="b-term">btrfs inline only</td>
+          <td>File writes/appends capped at 2KB on btrfs</td>
+          <td>Regular extent allocations and leaf splits not yet implemented</td>
         </tr>
         <tr>
           <td class="b-term">No EA writes</td>
@@ -358,13 +502,8 @@
           <td>EA area lives beyond 128-byte base inode</td>
         </tr>
         <tr>
-          <td class="b-term">No inline data</td>
-          <td>EXT4_INLINE_DATA_FL inodes skipped on write</td>
-          <td>Separate read/write paths needed</td>
-        </tr>
-        <tr>
           <td class="b-term">No encryption</td>
-          <td>EXT4_ENCRYPT_FL files skipped</td>
+          <td>EXT4_ENCRYPT_FL / encrypted files skipped</td>
           <td>Requires kernel keyring integration</td>
         </tr>
         <tr>
@@ -372,26 +511,21 @@
           <td>metadata_csum not verified or updated</td>
           <td>Checksum verification would add ~200 lines</td>
         </tr>
-        <tr>
-          <td class="b-term">No orphan_file</td>
-          <td>Uses legacy S_last_orphan list</td>
-          <td>Linux 5.15+ orphan file is separate linked-list</td>
-        </tr>
       </tbody>
     </table>
 
     <aside class="bound-notes">
       <div class="b-note">
-        <span class="b-note-ref">depth-0</span>
-        <span class="b-note-body">The extent tree is stored inline in the inode (i_block, 60 bytes). A 12-byte header plus four 12-byte extents fit. Index blocks for deeper trees are not yet implemented.</span>
+        <span class="b-note-ref">btrfs inline</span>
+        <span class="b-note-body">Inline extents store data directly in the B-tree leaf node. Writing files up to 2KB is fully functional; writes exceeding 2KB are restricted as leaf branches allocations/splits are not present.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">redo log</span>
-        <span class="b-note-body">On every WriteAt: pre-read the target block, write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed to restore pre-write state.</span>
+        <span class="b-note-body">On every ext4 WriteAt: pre-read the target block, write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">testing</span>
-        <span class="b-note-body">Prefer disk images over real drives. ext4 is complex and there are no absolute guarantees. The redo log provides crash recovery, but always back up important data.</span>
+        <span class="b-note-body">Prefer disk images over real drives. The redo log provides ext4 crash recovery, but always back up important data.</span>
       </div>
     </aside>
   </div>
@@ -404,7 +538,7 @@
     <p class="colophon-line">
       <span class="colophon-l">built for</span> Windows
       <span class="colophon-dot">&middot;</span>
-      <span class="colophon-l">reads</span> ext4
+      <span class="colophon-l">mounts</span> ext4 & btrfs (R/W)
       <span class="colophon-dot">&middot;</span>
       <span class="colophon-l">license</span> MIT
     </p>

@@ -11,6 +11,10 @@
   --swatch-super:   #4a3a5a;
   --swatch-group:   #3a5a5a;
   --swatch-data:    #6a5a3a;
+  --swatch-btrfs-boot:  #18181e;
+  --swatch-btrfs-super: #5a3a4a;
+  --swatch-btrfs-chunk: #3a4a5a;
+  --swatch-btrfs-tree:  #5a5a3a;
 
   --font: 'IBM Plex Mono', 'JetBrains Mono', 'Berkeley Mono', 'Courier New', monospace;
   --fw-light: 300;
@@ -161,13 +165,19 @@ a:hover { color: var(--lavender); text-decoration: underline; }
 }
 
 .sb-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.4rem 1.5rem;
+}
+@media (max-width: 480px) {
+  .sb-grid {
+    grid-template-columns: 1fr;
+    gap: 0.4rem 0;
+  }
 }
 
 .sb-item { display: flex; gap: 0.3em; }
-.sb-wide { flex: 1; min-width: 200px; }
+.sb-wide { grid-column: 1 / -1; }
 
 .sb-label { color: var(--text-muted); opacity: 0.6; }
 .sb-label::after { content: "="; color: var(--text-muted); opacity: 0.6; margin: 0 0.25em; }
@@ -205,6 +215,10 @@ a:hover { color: var(--lavender); text-decoration: underline; }
 .seg-super { width: 10%; background: var(--swatch-super); }
 .seg-group { width: 15%; background: var(--swatch-group); }
 .seg-data  { width: 60%; background: var(--swatch-data); }
+.seg-btrfs-boot  { width: 10%; background: var(--swatch-btrfs-boot); }
+.seg-btrfs-super { width: 5%;  background: var(--swatch-btrfs-super); }
+.seg-btrfs-chunk { width: 25%; background: var(--swatch-btrfs-chunk); }
+.seg-btrfs-tree  { width: 60%; background: var(--swatch-btrfs-tree); }
 
 .layout-legend {
   display: flex;
@@ -226,6 +240,11 @@ a:hover { color: var(--lavender); text-decoration: underline; }
 .swatch-super { background: var(--swatch-super); }
 .swatch-group { background: var(--swatch-group); }
 .swatch-data  { background: var(--swatch-data); }
+.swatch-btrfs-boot  { background: var(--swatch-btrfs-boot); }
+.swatch-btrfs-super { background: var(--swatch-btrfs-super); }
+.swatch-btrfs-chunk { background: var(--swatch-btrfs-chunk); }
+.swatch-btrfs-tree  { background: var(--swatch-btrfs-tree); }
+
 
 .layout-addr {
   display: flex;
@@ -616,4 +635,197 @@ a:hover { color: var(--lavender); text-decoration: underline; }
   a { color: #000 !important; }
   .superblock-card,
   .topo-block { background: #f0f0f0 !important; }
+}
+
+/* ── MATRIX COMPARISON TABLE ────────────────────────────────────────── */
+
+.matrix-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  background: var(--accent-bg);
+  margin-top: 0.8rem;
+  border-radius: 4px;
+}
+
+.matrix-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.matrix-tbl th {
+  background: rgba(40, 40, 48, 0.3);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.matrix-tbl td {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid rgba(40, 40, 48, 0.5);
+  vertical-align: middle;
+}
+
+.matrix-tbl tr:last-child td {
+  border-bottom: none;
+}
+
+.matrix-tbl tr:hover {
+  background: rgba(200, 184, 216, 0.02);
+}
+
+.text-center { text-align: center; }
+
+.status-yes {
+  color: var(--teal);
+  font-weight: var(--fw-medium);
+}
+
+.status-no {
+  color: var(--text-muted);
+}
+
+.status-warning {
+  color: var(--lavender);
+  font-size: 0.72rem;
+  display: block;
+}
+
+/* ── MOBILE RESPONSIVE OVERRIDES ─────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  /* Prevent horizontal overflow completely */
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  /* Masthead download button spacing and full-width */
+  .masthead {
+    margin-bottom: 2rem;
+  }
+  .btn-download {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 0.7rem 1.2rem;
+    font-size: 0.85rem;
+    margin-top: 1.5rem;
+  }
+  /* Center and stack masthead metadata */
+  .project-meta-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    text-align: center;
+  }
+  .project-meta-line .meta-dot {
+    display: none;
+  }
+  /* Scale down spaced project title on small screens to prevent overflow */
+  .project-name {
+    font-size: 2.2rem;
+    letter-spacing: 0.04em;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Page padding */
+  .page {
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  /* Volume layouts padding, alignment, and centering */
+  .layout-card {
+    padding: 0; /* Remove double padding to align layout bars with body copy margins */
+  }
+  .layout-title {
+    text-align: center;
+  }
+  .layout-legend {
+    justify-content: center;
+  }
+  .layout-addr {
+    font-size: 0.58rem;
+    justify-content: center;
+  }
+  .layout-addr span {
+    text-align: center;
+  }
+
+  /* Comparison Matrix table optimizations */
+  .matrix-tbl th, .matrix-tbl td {
+    padding: 0.5rem 0.4rem;
+    font-size: 0.72rem;
+  }
+  .matrix-tbl th:nth-child(4), .matrix-tbl td:nth-child(4) {
+    display: none; /* Hide details column on mobile to keep the chart perfectly clean and fitting */
+  }
+
+  /* Collapsed architecture components indicator tree on mobile */
+  .arch-comp {
+    border-left: 2px solid var(--border);
+    padding-left: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Source structure tree code container adjustments */
+  .tree {
+    font-size: 0.72rem;
+    padding: 0.5rem;
+    background: rgba(24, 24, 30, 0.2);
+    border: 1px solid rgba(40, 40, 48, 0.3);
+  }
+
+  /* Stack Known Boundaries table into readable vertical cards on mobile */
+  .bound-tbl, .bound-tbl thead, .bound-tbl tbody, .bound-tbl th, .bound-tbl td, .bound-tbl tr {
+    display: block;
+  }
+  .bound-tbl thead {
+    display: none;
+  }
+  .bound-tbl tr {
+    border-bottom: 1px solid var(--border);
+    padding: 0.8rem 0;
+  }
+  .bound-tbl tr:last-child {
+    border-bottom: none;
+  }
+  .bound-tbl td {
+    padding: 0.15rem 0;
+    font-size: 0.78rem;
+  }
+  .bound-tbl td:nth-child(1) {
+    font-weight: var(--fw-semibold);
+    color: var(--teal);
+    font-size: 0.82rem;
+  }
+  .bound-tbl td:nth-child(2)::before {
+    content: "Impact: ";
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: var(--fw-medium);
+  }
+  .bound-tbl td:nth-child(3)::before {
+    content: "Rationale: ";
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: var(--fw-medium);
+  }
+
+  /* Notes text alignment */
+  .ch-note {
+    padding-left: 0.8rem;
+    margin-top: 1rem;
+    font-size: 0.8rem;
+  }
 }
