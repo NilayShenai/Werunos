@@ -44,16 +44,9 @@ changelog:
       - "^docs:"
       - "^test:"
 
-scoops:
-  - name: werunos
-    repository:
-      owner: NilayShenai
-      name: scoop-bucket
-      token: "{{ .Env.GITHUB_TOKEN }}"
-    commit_author:
-      name: goonix Developer
-      email: nilayshenai@gmail.com
-    homepage: "https://github.com/NilayShenai/Werunos"
-    description: "Lightweight userspace Ext4 & Btrfs filesystem driver for Windows via WinFsp."
-    license: MIT
+release:
+  mode: replace
+
+
+
 
