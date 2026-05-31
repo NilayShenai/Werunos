@@ -26,13 +26,13 @@ Werunos enables direct access to Linux partitions on Windows without requiring d
 
 ## Key capabilities
 
-- **Transparent decompression**: Decodes zlib and LZO compressed Btrfs extents on-the-fly.
-- **Robust B-tree mutations**: Transactional Copy-on-Write B-tree root commits with CRC32c validation.
+- **Transparent decompression**: Decodes zlib, LZO, and ZSTD compressed Btrfs extents on-the-fly.
+- **Robust B-tree mutations**: Transactional Copy-on-Write B-tree root commits with CRC32c validation and multi-level splitting.
 - **Circular journal recovery**: Replays the ext4 jbd2 journal to recover from unclean shutdowns.
-- **Crash-safe writes**: Uses an external redo log to secure ext4 block modifications.
+- **Crash-safe writes**: Employs native JBD2 circular journaling on Ext4 and native Copy-on-Write (CoW) on Btrfs, with a sector-level redo log fallback.
 - **Full POSIX semantics**: High-fidelity support for hard links, symlinks, chmod, chown, and renames on both filesystems.
 - **Disk image mounting**: Supports mounting raw partitions or `.img` files as native Windows drive letters.
-- **Built-in filesystem check**: Five-phase ext4 integrity checker (`fsck`) with auto-repair parameters.
+- **Built-in filesystem check**: Five-phase ext4 integrity checker (`fsck`) with auto-repair and multi-tree Btrfs validation.
 
 ## Features
 
@@ -41,7 +41,7 @@ Werunos enables direct access to Linux partitions on Windows without requiring d
 | Operation | Ext4 Support | Btrfs Support | Technical Implementation / Reference |
 |---|---|---|---|
 | **Read files** | Yes | Yes | `reader.go` (ext4) / `tree.go` (btrfs): Chunk translation, inline and regular extent walks |
-| **Write files** | Yes | Yes (inline & regular) | `writer.go` (ext4) / `fs.go` (btrfs): Block allocs (ext4) and inline/regular writes with dynamic leaf splitting (btrfs) |
+| **Write files** | Yes | Yes (inline & regular) | `writer.go` (ext4) / `fs.go` (btrfs): Block allocs (ext4) and inline/regular writes with recursive multi-level B-tree node/leaf splitting (btrfs) |
 | **Create files** | Yes | Yes | `allocate.go` (ext4) / `fs.go` (btrfs): Inode allocation, directory indexing updates |
 | **Delete files** | Yes | Yes | `reclaim.go` (ext4) / `fs.go` (btrfs): Block reclamation (ext4), B-tree leaf key unlinking (btrfs) |
 | **Truncate (grow/shrink)** | Yes | Yes | `reclaim.go` (ext4) / `fs.go` (btrfs): Extent splitting (ext4) and Copy-on-Write B-tree leaf resizing (btrfs) |
@@ -84,14 +84,14 @@ Werunos enables direct access to Linux partitions on Windows without requiring d
 | Inode bitmaps (1 block per group) |  via `fs.dev.ReadAt` |  via `fs.dev.WriteAt` | `allocate.go`, `reclaim.go` |
 | Extent trees (depth ≥0) |  `ReadExtents` |  `AppendExtent` | `extents.go`, `allocate.go` |
 | Directory entries (DirEntry2) |  `ReadDir`, `Lookup` |  `AddDirEntry`, `RemoveDirEntry` | `directory.go`, `dirent.go` |
-| jbd2 journal (circular buffer) |  replay only | (redo log used instead) | `jbd2.go` |
+| jbd2 journal (circular buffer) |  Read & replay | Native circular journal writes | `jbd2.go`, `journal_writer.go` |
 | Symlinks (fast/slow) |  `ReadSymlink` |  via `I_block` / `WriteBlock` + `AppendExtent` | `symlinks.go`, `bridge.go` |
 
 ### Btrfs structures
 
 | Structure | Read | Write | File |
 |---|---|---|---|
-| Superblock (1024B at offset 65536) | `ReadSuperBlock` | - | `btrfs/super.go` |
+| Superblock (1024B at offset 65536) | `ReadSuperBlock` | `writeSuperBlock` | `btrfs/super.go` |
 | Chunk tree physical maps | `resolveChunkTree` | - | `btrfs/tree.go` |
 | Inodes (160B inode items) | `readInodeInfo` | `updateInLeaf` / `insertInodeItem` | `btrfs/fs.go`, `btrfs/writer.go` |
 | B-Tree node leaves | `walkFSTree` | `insertIntoLeaf` / `deleteFromLeaf` / `updateInLeaf` | `btrfs/tree.go`, `btrfs/writer.go` |

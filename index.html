@@ -309,7 +309,7 @@
               <td class="b-term">File Writing</td>
               <td class="text-center status-yes">&#x2714; Yes</td>
               <td class="text-center status-yes">&#x2714; Yes</td>
-              <td>Ext4: full block allocator, extent appending. Btrfs: inline/regular extents, dynamic block allocator with single-level B-tree leaf splitting.</td>
+              <td>Ext4: full block allocator, extent appending. Btrfs: inline/regular extents, dynamic block allocator with recursive multi-level B-tree node/leaf splitting.</td>
             </tr>
             <tr>
               <td class="b-term">Directory Ops</td>
@@ -550,7 +550,7 @@
     <aside class="bound-notes">
       <div class="b-note">
         <span class="b-note-ref">btrfs writes</span>
-        <span class="b-note-body">Werunos fully supports both inline (up to 2KB) and regular extents (arbitrary sizes >2KB) on Btrfs, using physical chunk allocation and single-level B-tree leaf node splitting. Dynamic zlib write compression is automatically applied to compressible extents.</span>
+        <span class="b-note-body">Werunos fully supports both inline (up to 2KB) and regular extents (arbitrary sizes >2KB) on Btrfs, using physical chunk allocation and recursive multi-level B-tree node/leaf splitting. Dynamic zlib write compression is automatically applied to compressible extents.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">redo log</span>
