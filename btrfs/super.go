@@ -1,6 +1,7 @@
 package btrfs
 
 import (
+	"encoding/binary"
 	"fmt"
 )
 
@@ -136,3 +137,33 @@ type SuperBlock struct {
 	LogRootLevel        uint8
 	SysChunkData        []byte
 }
+
+func (b *FileSystem) writeSuperBlock() error {
+	buf := make([]byte, superblockSize)
+	_, err := b.dev.ReadAt(buf, superblockOffset)
+	if err != nil {
+		return err
+	}
+
+	binary.LittleEndian.PutUint64(buf[48:56], b.sb.Bytenr)
+	binary.LittleEndian.PutUint64(buf[56:64], b.sb.Flags)
+	binary.LittleEndian.PutUint64(buf[64:72], b.sb.Magic)
+	binary.LittleEndian.PutUint64(buf[72:80], b.sb.Generation)
+	binary.LittleEndian.PutUint64(buf[80:88], b.sb.Root)
+	binary.LittleEndian.PutUint64(buf[88:96], b.sb.ChunkRoot)
+	binary.LittleEndian.PutUint64(buf[96:104], b.sb.LogRoot)
+	binary.LittleEndian.PutUint64(buf[104:112], b.sb.LogRootTransid)
+	binary.LittleEndian.PutUint64(buf[112:120], b.sb.TotalBytes)
+	binary.LittleEndian.PutUint64(buf[120:128], b.sb.BytesUsed)
+
+	buf[198] = b.sb.RootLevel
+	buf[199] = b.sb.ChunkRootLevel
+	buf[200] = b.sb.LogRootLevel
+
+	csum := calcCrc32c(buf[32:])
+	binary.LittleEndian.PutUint32(buf[0:4], csum)
+
+	_, err = b.dev.WriteAt(buf, superblockOffset)
+	return err
+}
+

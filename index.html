@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Werunos</title>
-<meta name="description" content="A robust userspace Ext4 and Btrfs filesystem driver for Windows utilizing WinFsp. Experience POSIX-compliant read-write operations, zlib/LZO decompression, crash-safe redo logs, and physical disk/raw image mounting natively.">
+<meta name="description" content="A robust userspace Ext4 and Btrfs filesystem driver for Windows utilizing WinFsp. Experience POSIX-compliant read-write operations, zlib/LZO decompression, native circular JBD2 journaling, B-tree Copy-on-Write (CoW), and physical disk/raw image mounting natively.">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -31,7 +31,7 @@
       <span class="meta-dot">&middot;</span>
       <a href="https://github.com/NilayShenai/Werunos">github.com/NilayShenai/Werunos</a>
     </p>
-    <a class="btn-download" href="https://github.com/NilayShenai/Werunos/releases/download/1.8.5/werunos.exe">Download Release</a>
+    <a class="btn-download" href="https://github.com/NilayShenai/Werunos/releases/download/2.1/werunos.exe">Download Release</a>
   </div>
 </header>
 
@@ -89,10 +89,10 @@
     <h2 class="ch-title">Overview</h2>
     <p class="ch-text">
       Werunos provides high-performance ext4 and btrfs read-write support in userspace. It mounts
-      volumes directly as native Windows drives via WinFsp, utilizing structured B-tree walks, logical-to-physical chunk translation, and transparent compression segment decoding without any kernel modules.
+      volumes directly as native Windows drives via WinFsp, utilizing structured B-tree walks, logical-to-physical chunk translation, native circular JBD2 journaling, B-tree Copy-on-Write (CoW) commits, and transparent compression segment decoding without any kernel modules. With the completion of all three core engineering phases, the driver is now fully complete, stable, and ready for production use.
     </p>
     <p class="ch-text">
-      While maintaining lightweight ext4 mounts, Werunos features a complete userspace Btrfs engine. It decodes the superblock system chunk array, resolves complex chunk trees, performs in-place leaf mutations (insert, update, and delete), and supports transparent on-the-fly decompressions for <strong>zlib</strong> and <strong>LZO</strong> extents.
+      Werunos features a complete userspace Btrfs engine. It decodes the superblock system chunk array, resolves complex chunk trees, performs native Copy-on-Write (CoW) root commits, and supports transparent on-the-fly decompressions for <strong>zlib</strong>, <strong>LZO</strong>, and <strong>ZSTD</strong> extents.
     </p>
     <aside class="ch-note">
       <span class="note-indicator">&#x25C6;</span>
@@ -263,15 +263,32 @@
       </ul>
     </div>
 
-    <div class="roadmap-phase roadmap-active">
+    <div class="roadmap-phase roadmap-completed">
       <div class="phase-hdr">
         <span class="phase-badge">Phase 3</span>
         <h3 class="phase-title">Native Transactions</h3>
       </div>
       <ul class="phase-list">
-        <li>Btrfs native Copy-on-Write commits</li>
-        <li>Ext4 native JBD2 journal pipeline</li>
-        <li>Unified transaction synchronization</li>
+        <li>Btrfs leaf and node Copy-on-Write updates</li>
+        <li>Btrfs superblock root pointer serialization</li>
+        <li>Btrfs superblock CRC32c checksum verification</li>
+        <li>Ext4 active transaction memory write buffering</li>
+        <li>Ext4 circular JBD2 descriptor and commit blocks</li>
+        <li>Standard FUSE named-return commit propagation</li>
+      </ul>
+    </div>
+
+    <div class="roadmap-phase roadmap-active">
+      <div class="phase-hdr">
+        <span class="phase-badge">Future Plans</span>
+        <h3 class="phase-title">Extended Safety &amp; Tools</h3>
+      </div>
+      <ul class="phase-list">
+        <li>Read-Only Safety Switch (--ro) for recovery</li>
+        <li>Dynamic filesystem auto-detection in device lists</li>
+        <li>Subvolume &amp; Multi-Device RAID support (Btrfs)</li>
+        <li>Ext4/Btrfs native fscrypt encryption</li>
+        <li>Online metadata defragmentation</li>
       </ul>
     </div>
   </div>
@@ -330,7 +347,7 @@
               <td class="b-term">File Truncation</td>
               <td class="text-center status-yes">&#x2714; Yes</td>
               <td class="text-center status-yes">&#x2714; Yes</td>
-              <td>Supports resizing files (grow / shrink). Ext4: extent tree splitting. Btrfs: in-place leaf updates.</td>
+              <td>Supports resizing files (grow / shrink). Ext4: extent tree splitting. Btrfs: Copy-on-Write leaf updates.</td>
             </tr>
             <tr>
               <td class="b-term">Links (Hard & Sym)</td>
@@ -359,13 +376,13 @@
     <div class="cap-group">
       <h3 class="cap-group-title">Crash Safety</h3>
       <ul class="cap-list">
-        <li>jbd2 journal replay (ext4)</li>
+        <li>jbd2 journal replay &amp; native commits (ext4)</li>
         <li>orphan inode cleanup (ext4)</li>
-        <li>external redo log (ext4)</li>
-        <li>superblock flush on unmount (both)</li>
+        <li>external redo log fallback (ext4)</li>
+        <li>native Copy-on-Write root updates (btrfs)</li>
+        <li>superblock flush &amp; checksum updates (both)</li>
         <li>graceful fallback on replay failure (ext4)</li>
         <li>recovery flag auto-clear (ext4)</li>
-        <li>atomic leaf mutations with checksum updates (btrfs)</li>
       </ul>
     </div>
 
@@ -530,16 +547,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td class="b-term">No journal submission</td>
-          <td>Metadata writes bypass jbd2; redo log covers crashes (ext4)</td>
-          <td>jbd2 transaction pipeline requires descriptor/data/commit</td>
-        </tr>
-        <tr>
-          <td class="b-term">No btrfs CoW</td>
-          <td>Leaf node writes updated in-place; bypasses transaction commits</td>
-          <td>Crash-unsafe but lightweight, keeping tree structures simple (mitigated by SafeDevice redo logging)</td>
-        </tr>
+
         <tr>
           <td class="b-term">No encryption</td>
           <td>EXT4_ENCRYPT_FL / encrypted files skipped</td>
@@ -560,7 +568,7 @@
       </div>
       <div class="b-note">
         <span class="b-note-ref">redo log</span>
-        <span class="b-note-body">On every Ext4 and Btrfs WriteAt: pre-read the target block (accelerated by a thread-safe 64-slot LRU block cache), write old data to a log file in %TEMP%, fsync, issue the write, then truncate the log. On restart after a crash, the log is replayed.</span>
+        <span class="b-note-body">Werunos provides native JBD2 circular journaling on Ext4 and native Copy-on-Write (CoW) root commits on Btrfs. The external redo log (SafeDevice) remains active as an automated block-level fallback layer for partitions without native journal logs.</span>
       </div>
       <div class="b-note">
         <span class="b-note-ref">testing</span>

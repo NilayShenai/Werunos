@@ -175,7 +175,18 @@ func (e *FileSystem) Release(path string) error {
 	return nil
 }
 
-func (e *FileSystem) Create(path string, flags int, mode uint32) error {
+func (e *FileSystem) Create(path string, flags int, mode uint32) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	parent, name, err := splitPath(path)
 	if err != nil {
 		return err
@@ -216,7 +227,18 @@ func (e *FileSystem) Create(path string, flags int, mode uint32) error {
 	return nil
 }
 
-func (e *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
+func (e *FileSystem) Write(path string, buf []byte, ofst int64) (n int, err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	e.mu.Lock()
 	f, ok := e.files[path]
 	e.mu.Unlock()
@@ -230,7 +252,7 @@ func (e *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := e.inner.WriteFileAt(inode, buf, ofst)
+	n, err = e.inner.WriteFileAt(inode, buf, ofst)
 	if err != nil {
 		return 0, err
 	}
@@ -251,7 +273,18 @@ func (e *FileSystem) Write(path string, buf []byte, ofst int64) (int, error) {
 	return n, nil
 }
 
-func (e *FileSystem) Mkdir(path string, mode uint32) error {
+func (e *FileSystem) Mkdir(path string, mode uint32) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	parent, name, err := splitPath(path)
 	if err != nil {
 		return err
@@ -305,7 +338,18 @@ func (e *FileSystem) Rmdir(path string) error {
 	return e.removeEntry(path, true)
 }
 
-func (e *FileSystem) removeEntry(path string, mustBeDir bool) error {
+func (e *FileSystem) removeEntry(path string, mustBeDir bool) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	parent, name, err := splitPath(path)
 	if err != nil {
 		return err
@@ -379,7 +423,18 @@ func (e *FileSystem) removeEntry(path string, mustBeDir bool) error {
 	return nil
 }
 
-func (e *FileSystem) Rename(oldpath, newpath string) error {
+func (e *FileSystem) Rename(oldpath, newpath string) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	oldParent, oldName, err := splitPath(oldpath)
 	if err != nil {
 		return err
@@ -466,7 +521,18 @@ func (e *FileSystem) Rename(oldpath, newpath string) error {
 	return nil
 }
 
-func (e *FileSystem) Chmod(path string, mode uint32) error {
+func (e *FileSystem) Chmod(path string, mode uint32) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	inodeNum, inode, err := e.inner.WalkInode(path)
 	if err != nil {
 		return err
@@ -476,7 +542,18 @@ func (e *FileSystem) Chmod(path string, mode uint32) error {
 	return e.inner.WriteInode(inodeNum, inode)
 }
 
-func (e *FileSystem) Chown(path string, uid, gid uint32) error {
+func (e *FileSystem) Chown(path string, uid, gid uint32) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	inodeNum, inode, err := e.inner.WalkInode(path)
 	if err != nil {
 		return err
@@ -489,7 +566,18 @@ func (e *FileSystem) Chown(path string, uid, gid uint32) error {
 	return e.inner.WriteInode(inodeNum, inode)
 }
 
-func (e *FileSystem) Truncate(path string, size int64) error {
+func (e *FileSystem) Truncate(path string, size int64) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	inodeNum, inode, err := e.inner.WalkInode(path)
 	if err != nil {
 		return err
@@ -524,7 +612,18 @@ func (e *FileSystem) Truncate(path string, size int64) error {
 	return e.inner.WriteInode(inodeNum, inode)
 }
 
-func (e *FileSystem) Symlink(target, newpath string) error {
+func (e *FileSystem) Symlink(target, newpath string) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	parent, name, err := splitPath(newpath)
 	if err != nil {
 		return err
@@ -587,7 +686,18 @@ func (e *FileSystem) Symlink(target, newpath string) error {
 	return e.inner.WriteInode(parentNum, parentInode)
 }
 
-func (e *FileSystem) Link(oldpath, newpath string) error {
+func (e *FileSystem) Link(oldpath, newpath string) (err error) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if err != nil {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				err = commitErr
+			}
+		}
+	}()
+
 	targetNum, targetInode, err := e.inner.WalkInode(oldpath)
 	if err != nil {
 		return err
@@ -660,7 +770,18 @@ func (e *FileSystem) Getxattr(path string, name string) (int, []byte) {
 	return 0, val
 }
 
-func (e *FileSystem) Setxattr(path string, name string, value []byte, flags int) int {
+func (e *FileSystem) Setxattr(path string, name string, value []byte, flags int) (res int) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if res != 0 {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				res = -fuse.EIO
+			}
+		}
+	}()
+
 	inodeNum, _, err := e.inner.WalkInode(path)
 	if err != nil {
 		if errors.Is(err, vfs.ErrNotExist) {
@@ -717,7 +838,18 @@ func (e *FileSystem) Listxattr(path string, fill func(name string) bool) int {
 	return 0
 }
 
-func (e *FileSystem) Removexattr(path string, name string) int {
+func (e *FileSystem) Removexattr(path string, name string) (res int) {
+	e.inner.BeginTransaction()
+	defer func() {
+		if res != 0 {
+			e.inner.RollbackTransaction()
+		} else {
+			if commitErr := e.inner.CommitTransaction(); commitErr != nil {
+				res = -fuse.EIO
+			}
+		}
+	}()
+
 	inodeNum, _, err := e.inner.WalkInode(path)
 	if err != nil {
 		if errors.Is(err, vfs.ErrNotExist) {

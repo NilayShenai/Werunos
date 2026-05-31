@@ -32,6 +32,8 @@ type FileSystem struct {
 	DescSize uint16
 
 	dirCache sync.Map
+
+	txMu sync.Mutex
 }
 
 func NewFileSystem(device ReadWriterAt) (*FileSystem, error) {
