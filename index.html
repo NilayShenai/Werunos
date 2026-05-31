@@ -487,11 +487,6 @@
       </thead>
       <tbody>
         <tr>
-          <td class="b-term">Depth-0 extents</td>
-          <td>Files with &gt;4 non-contiguous extents cannot extend (ext4)</td>
-          <td>Full B-tree manipulation is ~500 additional lines</td>
-        </tr>
-        <tr>
           <td class="b-term">No journal submission</td>
           <td>Metadata writes bypass jbd2; redo log covers crashes (ext4)</td>
           <td>jbd2 transaction pipeline requires descriptor/data/commit</td>
@@ -500,11 +495,6 @@
           <td class="b-term">No btrfs CoW</td>
           <td>Leaf node writes updated in-place; bypasses transaction commits</td>
           <td>Crash-unsafe but lightweight, keeping tree structures simple (mitigated by SafeDevice redo logging)</td>
-        </tr>
-        <tr>
-          <td class="b-term">No EA writes</td>
-          <td>Extended attributes preserved but not modified</td>
-          <td>EA area lives beyond 128-byte base inode</td>
         </tr>
         <tr>
           <td class="b-term">No encryption</td>
@@ -533,6 +523,51 @@
         <span class="b-note-body">Prefer disk images over real drives. The redo log provides unified crash recovery, and the built-in fsck verifier can systematically validate Btrfs and Ext4 volume integrity. Always back up important data.</span>
       </div>
     </aside>
+  </div>
+</section>
+
+<section class="chapter" id="roadmap">
+  <div class="ch-meta"><span class="ch-meta-dia">&#x25C6;</span>inode 0007</div>
+  <h2 class="ch-title">Phased Roadmap</h2>
+
+  <div class="roadmap-grid">
+    <div class="roadmap-phase roadmap-completed">
+      <div class="phase-hdr">
+        <span class="phase-badge">Phase 1</span>
+        <h3 class="phase-title">Core Performance, Tooling &amp; Btrfs</h3>
+      </div>
+      <ul class="phase-list">
+        <li>SafeDevice sector LRU block cache</li>
+        <li>Real Btrfs ZSTD decompression integration</li>
+        <li>Btrfs transparent Zlib write compression</li>
+        <li>Multi-tree Btrfs FSCK verifier</li>
+      </ul>
+    </div>
+
+    <div class="roadmap-phase roadmap-completed">
+      <div class="phase-hdr">
+        <span class="phase-badge">Phase 2</span>
+        <h3 class="phase-title">Advanced Trees &amp; Allocation</h3>
+      </div>
+      <ul class="phase-list">
+        <li>Btrfs recursive multi-level index splits</li>
+        <li>Ext4 multi-depth extent trees (Depth &gt; 0)</li>
+        <li>Ext4 in-inode and external block EA writes</li>
+        <li>Complete xattr read-modify-write engine</li>
+      </ul>
+    </div>
+
+    <div class="roadmap-phase roadmap-active">
+      <div class="phase-hdr">
+        <span class="phase-badge">Phase 3</span>
+        <h3 class="phase-title">Native Transactions</h3>
+      </div>
+      <ul class="phase-list">
+        <li>Btrfs native Copy-on-Write commits</li>
+        <li>Ext4 native JBD2 journal pipeline</li>
+        <li>Unified transaction synchronization</li>
+      </ul>
+    </div>
   </div>
 </section>
 

@@ -13,14 +13,25 @@ type itemEntry struct {
 }
 
 func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) error {
-	leafLogical, err := b.resolveLeaf(logicalAddr, k)
+	var lvl uint8
+	if logicalAddr == b.fsRoot {
+		lvl = b.fsRootLvl
+	} else if logicalAddr == b.extentRoot {
+		lvl = b.extentRootLvl
+	} else if logicalAddr == b.sb.ChunkRoot {
+		lvl = b.sb.ChunkRootLevel
+	} else {
+		lvl = 0
+	}
+
+	path, err := b.findLeafWithPath(logicalAddr, lvl, k)
 	if err != nil {
 		return err
 	}
-	physAddr, err := b.tc.resolve(leafLogical)
-	if err != nil {
-		return err
-	}
+	leaf := path[len(path)-1]
+	leafLogical := leaf.logical
+
+	physAddr := leaf.phys
 	bs := int(b.sb.NodeSize)
 	buf := make([]byte, bs)
 	if _, err := b.dev.ReadAt(buf, int64(physAddr)); err != nil {
@@ -90,7 +101,7 @@ func (b *FileSystem) insertIntoLeaf(logicalAddr uint64, k key, itemData []byte) 
 
 	needed := nodeHeaderSize + len(all)*25 + totalData
 	if needed > bs {
-		return b.splitLeaf(leafLogical, k, all, bs, ins)
+		return b.splitLeafWithPath(path, logicalAddr, k, all, bs)
 	}
 
 	dst := make([]byte, bs)
@@ -713,7 +724,69 @@ func (b *FileSystem) writeItemsToLeaf(leafLogical uint64, items []itemEntry, bs 
 	return err
 }
 
-func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs int, ins int) error {
+type pathElement struct {
+	logical uint64
+	phys    uint64
+	level   uint8
+	index   int
+}
+
+func (b *FileSystem) findLeafWithPath(root uint64, lvl uint8, k key) ([]pathElement, error) {
+	var path []pathElement
+	curr := root
+	currLvl := lvl
+
+	for currLvl > 0 {
+		phys, err := b.tc.resolve(curr)
+		if err != nil {
+			return nil, err
+		}
+		buf, err := readNode(b.dev, phys, b.sb.NodeSize)
+		if err != nil {
+			return nil, err
+		}
+		r := &byteReader{buf: buf}
+		h := decodeNodeHeader(r)
+
+		var bestPtr uint64 = 0
+		bestIdx := 0
+		for i := uint32(0); i < h.nritems; i++ {
+			p := decodeInternalPtr(r)
+			if i == 0 || !k.less(p.key) {
+				bestPtr = p.blockptr
+				bestIdx = int(i)
+			}
+		}
+
+		path = append(path, pathElement{
+			logical: curr,
+			phys:    phys,
+			level:   currLvl,
+			index:   bestIdx,
+		})
+
+		if bestPtr == 0 {
+			break
+		}
+		curr = bestPtr
+		currLvl = currLvl - 1
+	}
+
+	physLeaf, err := b.tc.resolve(curr)
+	if err != nil {
+		return nil, err
+	}
+	path = append(path, pathElement{
+		logical: curr,
+		phys:    physLeaf,
+		level:   0,
+		index:   -1,
+	})
+
+	return path, nil
+}
+
+func (b *FileSystem) splitLeafWithPath(path []pathElement, rootAddr uint64, k key, all []itemEntry, bs int) error {
 	newLeafLogical, _, err := b.allocateSpace(uint64(bs), BTRFS_BLOCK_GROUP_METADATA)
 	if err != nil {
 		return fmt.Errorf("btrfs: split leaf: fail to allocate node: %w", err)
@@ -723,7 +796,8 @@ func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs in
 	leftItems := all[:mid]
 	rightItems := all[mid:]
 
-	err = b.writeItemsToLeaf(logicalLeaf, leftItems, bs)
+	leaf := path[len(path)-1]
+	err = b.writeItemsToLeaf(leaf.logical, leftItems, bs)
 	if err != nil {
 		return err
 	}
@@ -735,7 +809,14 @@ func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs in
 
 	_ = b.registerExtent(newLeafLogical, uint64(bs))
 
-	if b.fsRoot == logicalLeaf && b.fsRootLvl == 0 {
+	splitKey := rightItems[0].k
+	splitPtr := internalKeyPtr{key: splitKey, blockptr: newLeafLogical}
+
+	return b.insertPtrIntoParent(path[:len(path)-1], rootAddr, splitPtr, bs)
+}
+
+func (b *FileSystem) insertPtrIntoParent(path []pathElement, rootAddr uint64, splitPtr internalKeyPtr, bs int) error {
+	if len(path) == 0 {
 		newRootLogical, newRootPhys, err := b.allocateSpace(uint64(bs), BTRFS_BLOCK_GROUP_METADATA)
 		if err != nil {
 			return err
@@ -744,18 +825,30 @@ func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs in
 		dst := make([]byte, bs)
 		binary.LittleEndian.PutUint32(dst[96:100], 2)
 		dst[100] = 1
+		if rootAddr == b.fsRoot {
+			dst[100] = b.fsRootLvl + 1
+		} else if rootAddr == b.extentRoot {
+			dst[100] = b.extentRootLvl + 1
+		} else if rootAddr == b.sb.ChunkRoot {
+			dst[100] = b.sb.ChunkRootLevel + 1
+		}
 		binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
 		binary.LittleEndian.PutUint64(dst[48:56], newRootLogical)
 		binary.LittleEndian.PutUint64(dst[112:120], 5)
 
+		leftKey, err := b.getNodeFirstKey(rootAddr, bs)
+		if err != nil {
+			leftKey = key{}
+		}
+
 		off1 := nodeHeaderSize
-		encodeKeyInto(dst[off1:off1+17], leftItems[0].k)
-		binary.LittleEndian.PutUint64(dst[off1+17:off1+25], logicalLeaf)
+		encodeKeyInto(dst[off1:off1+17], leftKey)
+		binary.LittleEndian.PutUint64(dst[off1+17:off1+25], rootAddr)
 		binary.LittleEndian.PutUint64(dst[off1+25:off1+33], b.sb.Generation)
 
 		off2 := nodeHeaderSize + 33
-		encodeKeyInto(dst[off2:off2+17], rightItems[0].k)
-		binary.LittleEndian.PutUint64(dst[off2+17:off2+25], newLeafLogical)
+		encodeKeyInto(dst[off2:off2+17], splitPtr.key)
+		binary.LittleEndian.PutUint64(dst[off2+17:off2+25], splitPtr.blockptr)
 		binary.LittleEndian.PutUint64(dst[off2+25:off2+33], b.sb.Generation)
 
 		csum := calcCrc32c(dst[32:])
@@ -767,11 +860,130 @@ func (b *FileSystem) splitLeaf(logicalLeaf uint64, k key, all []itemEntry, bs in
 
 		_ = b.registerExtent(newRootLogical, uint64(bs))
 
-		b.fsRoot = newRootLogical
-		b.fsRootLvl = 1
+		if rootAddr == b.fsRoot {
+			b.fsRoot = newRootLogical
+			b.fsRootLvl++
+		} else if rootAddr == b.extentRoot {
+			b.extentRoot = newRootLogical
+			b.extentRootLvl++
+		} else if rootAddr == b.sb.ChunkRoot {
+			b.sb.ChunkRoot = newRootLogical
+			b.sb.ChunkRootLevel++
+		}
 
 		return nil
 	}
 
-	return fmt.Errorf("btrfs: leaf has no space (need %d, have %d) and split not supported above level 0", nodeHeaderSize+len(all)*25, bs)
+	parent := path[len(path)-1]
+
+	phys, err := b.tc.resolve(parent.logical)
+	if err != nil {
+		return err
+	}
+	buf, err := readNode(b.dev, phys, uint32(bs))
+	if err != nil {
+		return err
+	}
+
+	r := &byteReader{buf: buf}
+	h := decodeNodeHeader(r)
+
+	var ptrs []internalKeyPtr
+	for i := uint32(0); i < h.nritems; i++ {
+		ptrs = append(ptrs, decodeInternalPtr(r))
+	}
+
+	insertIdx := len(ptrs)
+	for i := 0; i < len(ptrs); i++ {
+		if !ptrs[i].key.less(splitPtr.key) {
+			insertIdx = i
+			break
+		}
+	}
+
+	newPtrs := make([]internalKeyPtr, len(ptrs)+1)
+	copy(newPtrs[:insertIdx], ptrs[:insertIdx])
+	newPtrs[insertIdx] = splitPtr
+	copy(newPtrs[insertIdx+1:], ptrs[insertIdx:])
+
+	neededSize := nodeHeaderSize + len(newPtrs)*33
+	if neededSize > bs {
+		newParentLogical, _, err := b.allocateSpace(uint64(bs), BTRFS_BLOCK_GROUP_METADATA)
+		if err != nil {
+			return err
+		}
+
+		mid := len(newPtrs) / 2
+		leftPointers := newPtrs[:mid]
+		rightPointers := newPtrs[mid:]
+
+		if err := b.writePointersToNode(parent.logical, leftPointers, parent.level, bs); err != nil {
+			return err
+		}
+
+		if err := b.writePointersToNode(newParentLogical, rightPointers, parent.level, bs); err != nil {
+			return err
+		}
+
+		_ = b.registerExtent(newParentLogical, uint64(bs))
+
+		parentSplitPtr := internalKeyPtr{key: rightPointers[0].key, blockptr: newParentLogical}
+		return b.insertPtrIntoParent(path[:len(path)-1], rootAddr, parentSplitPtr, bs)
+	}
+
+	return b.writePointersToNode(parent.logical, newPtrs, parent.level, bs)
+}
+
+func (b *FileSystem) writePointersToNode(logical uint64, ptrs []internalKeyPtr, level uint8, bs int) error {
+	phys, err := b.tc.resolve(logical)
+	if err != nil {
+		return err
+	}
+	dst := make([]byte, bs)
+
+	buf, err := readNode(b.dev, phys, uint32(bs))
+	if err == nil {
+		copy(dst[:nodeHeaderSize], buf[:nodeHeaderSize])
+	}
+
+	binary.LittleEndian.PutUint32(dst[96:100], uint32(len(ptrs)))
+	dst[100] = level
+	binary.LittleEndian.PutUint64(dst[80:88], b.sb.Generation)
+	binary.LittleEndian.PutUint64(dst[48:56], logical)
+
+	for i, p := range ptrs {
+		off := nodeHeaderSize + i*33
+		encodeKeyInto(dst[off:off+17], p.key)
+		binary.LittleEndian.PutUint64(dst[off+17:off+25], p.blockptr)
+		binary.LittleEndian.PutUint64(dst[off+25:off+33], b.sb.Generation)
+	}
+
+	csum := calcCrc32c(dst[32:])
+	binary.LittleEndian.PutUint32(dst[0:4], csum)
+
+	_, err = b.dev.WriteAt(dst, int64(phys))
+	return err
+}
+
+func (b *FileSystem) getNodeFirstKey(logical uint64, bs int) (key, error) {
+	phys, err := b.tc.resolve(logical)
+	if err != nil {
+		return key{}, err
+	}
+	buf, err := readNode(b.dev, phys, uint32(bs))
+	if err != nil {
+		return key{}, err
+	}
+	r := &byteReader{buf: buf}
+	h := decodeNodeHeader(r)
+	if h.nritems == 0 {
+		return key{}, nil
+	}
+	if h.level == 0 {
+		item := decodeLeafItem(r)
+		return item.key, nil
+	} else {
+		ptr := decodeInternalPtr(r)
+		return ptr.key, nil
+	}
 }

@@ -78,6 +78,11 @@ type FileSystem interface {
 	Symlink(target, newpath string) error
 	Link(oldpath, newpath string) error
 
+	Getxattr(path string, name string) (int, []byte)
+	Setxattr(path string, name string, value []byte, flags int) int
+	Listxattr(path string, fill func(name string) bool) int
+	Removexattr(path string, name string) int
+
 	BlockSize() uint64
 	Statfs() *fuse.Statfs_t
 }

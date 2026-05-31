@@ -8,9 +8,6 @@ import (
 	"sync"
 )
 
-// ReadWriterAt is the interface used for all device I/O.
-// It combines io.ReaderAt and io.WriterAt (which Go does not provide as
-// a single pre-defined interface).
 type ReadWriterAt interface {
 	io.ReaderAt
 	io.WriterAt

@@ -12,6 +12,7 @@ If you have ever needed to access a Linux drive from Windows without booting a f
 - [Key capabilities](#key-capabilities)
 - [Features](#features)
 - [Status](#status)
+- [Roadmap and phases](#roadmap-and-phases)
 - [Quick start](#quick-start)
 - [Project layout](#project-layout)
 - [Contributing](#contributing)
@@ -99,6 +100,25 @@ If you have ever needed to access a Linux drive from Windows without booting a f
 ## Status
 
 Werunos is advanced and production-ready, but since it interacts directly with your raw filesystem blocks, you should always treat it with care. We highly recommend testing it on disk images or read-only copies first before running it on any critical, irreplaceable data. Always keep a backup!
+
+## Roadmap and phases
+
+To guarantee extreme stability and ensure every component compiles and runs flawlessly without regressions, the Werunos project follows a structured engineering roadmap consisting of three distinct execution phases:
+
+### Phase 1: Core Performance, Tooling and Btrfs Enhancements (Completed)
+- **SafeDevice sector LRU block cache**: Avoids synchronous physical disk pre-reads during sequential write operations.
+- **Real Btrfs ZSTD decompression**: Integrates high-performance native ZSTD frame decoding for modern Linux partitions.
+- **Btrfs write compression**: Adds transparent zlib write compression for compressible regular extents.
+- **Btrfs FSCK tree validator**: Traverses chunk, root, and filesystem trees systematically, validating CRC32c signatures.
+
+### Phase 2: Advanced B-Tree and Allocation Scaling (Completed)
+- **Btrfs recursive multi-level index splits**: Implements full index node splits up to arbitrary depths during directory growths.
+- **Ext4 multi-depth extent trees (Depth > 0)**: Implements intermediate extent indexing, splits, and tree depth scaling for large files.
+- **Ext4 Extended Attribute (EA) writes**: Adds a full read-modify-write extended attribute engine supporting both fast in-inode and rollover external block writes.
+
+### Phase 3: Native Transaction Pipelines (Active Development)
+- **Btrfs native Copy-on-Write**: Implements chunk tree stripes and root CoW updates to record modifications transactionally.
+- **Ext4 native JBD2 journal pipeline**: Bridges transaction commits directly to the journal block buffer instead of the external SafeDevice redo log.
 
 ## Quick start
 
@@ -319,10 +339,8 @@ on a SATA SSD for sequential writes: 150-300 MB/s. Random 4K writes: 5-15 MB/s.
 
 | Limitation | Impact | Technical reason / Rationale |
 |---|---|---|
-| **Depth-0 extents only (ext4)** | Files with >4 non-contiguous extents cannot be extended. | Full B-tree manipulation (index block splits, rotations) is bypassed to keep code minimal. |
 | **No journal submission (ext4)** | Metadata writes bypass jbd2. The redo log handles crashes; on restart the journal is clean. | Implementing the full transaction submission requires a complex descriptor/data/commit pipeline. |
 | **No btrfs Copy-on-Write (CoW)** | Btrfs B-tree leaf node writes are updated in-place. | Bypassing chunk splits and CoW tree transactions keeps driver footprint lightweight and simple (protected by SafeDevice transaction redo logging). |
-| **No EA writes** | Extended attributes are preserved on read-modify-write but not modified. | Inode EA area lives in the extended space beyond the 128-byte base inode. |
 | **No encryption** | Encrypted files (`EXT4_ENCRYPT_FL` / fscrypt) are skipped. | Requires integration with kernel keychain/keyring libraries. |
 | **No ext4 metadata checksums** | `metadata_csum` feature is not verified or updated on ext4 writes. | Verification would add significant parsing overhead (Btrfs CRC32c is fully calculated). |
 | **No online defrag** | `FICLONE` / `FIDEDUPERANGE` IOCTLs are ignored. | These are Linux-kernel specific IOCTL calls. |

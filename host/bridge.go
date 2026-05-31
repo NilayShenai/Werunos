@@ -262,6 +262,22 @@ func (j *OrionFS) Link(oldpath string, newpath string) int {
 	return 0
 }
 
+func (j *OrionFS) Getxattr(path string, name string) (int, []byte) {
+	return j.inner.Getxattr(path, name)
+}
+
+func (j *OrionFS) Setxattr(path string, name string, value []byte, flags int) int {
+	return j.inner.Setxattr(path, name, value, flags)
+}
+
+func (j *OrionFS) Listxattr(path string, fill func(name string) bool) int {
+	return j.inner.Listxattr(path, fill)
+}
+
+func (j *OrionFS) Removexattr(path string, name string) int {
+	return j.inner.Removexattr(path, name)
+}
+
 func nodeToStat(node fs.NodeInfo, stat *fuse.Stat_t) {
 	mode := node.Mode
 	if mode == 0 {

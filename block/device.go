@@ -5,7 +5,6 @@ import (
 	"io"
 )
 
-// ReadWriterAt is the interface used for all device I/O.
 type ReadWriterAt interface {
 	io.ReaderAt
 	io.WriterAt

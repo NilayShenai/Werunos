@@ -1019,6 +1019,22 @@ func (b *FileSystem) Superblock() (any, error) {
 	return b.sb, nil
 }
 
+func (b *FileSystem) Getxattr(path string, name string) (int, []byte) {
+	return -fuse.ENOSYS, nil
+}
+
+func (b *FileSystem) Setxattr(path string, name string, value []byte, flags int) int {
+	return -fuse.ENOSYS
+}
+
+func (b *FileSystem) Listxattr(path string, fill func(name string) bool) int {
+	return -fuse.ENOSYS
+}
+
+func (b *FileSystem) Removexattr(path string, name string) int {
+	return -fuse.ENOSYS
+}
+
 func (b *FileSystem) findFSTreeRoot() (rootAddr uint64, rootLvl uint8, rootDirID uint64, err error) {
 	err = b.tc.walkTree(b.sb.Root, b.sb.RootLevel, func(item leafItem, data []byte) error {
 		if item.key.typ == BTRFS_ROOT_ITEM_KEY && item.key.objectid == 5 {

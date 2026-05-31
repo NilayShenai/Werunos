@@ -59,7 +59,6 @@ func (b *FileSystem) Fsck() *BtrfsFsckResult {
 		return res
 	}
 
-	// 1. Superblock validation
 	if b.sb.Magic != btrfsMagic {
 		res.Healthy = false
 		res.Problems = append(res.Problems, BtrfsFsckProblem{
@@ -74,7 +73,6 @@ func (b *FileSystem) Fsck() *BtrfsFsckResult {
 		})
 	}
 
-	// 2. Validate trees and verify checksums recursively
 	b.verifyTreeChecksums(b.sb.ChunkRoot, b.sb.ChunkRootLevel, res)
 	b.verifyTreeChecksums(b.fsRoot, b.fsRootLvl, res)
 	if b.extentRoot != 0 {
@@ -107,7 +105,6 @@ func (b *FileSystem) verifyTreeChecksums(addr uint64, level uint8, res *BtrfsFsc
 
 	res.NodesChecked++
 
-	// Recalculate CRC32c and compare
 	csumCalculated := calcCrc32c(buf[32:])
 	csumExisting := binary.LittleEndian.Uint32(buf[0:4])
 	if csumCalculated != csumExisting {

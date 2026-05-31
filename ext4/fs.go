@@ -640,6 +640,103 @@ func (e *FileSystem) Statfs() *fuse.Statfs_t {
 	return stat
 }
 
+func (e *FileSystem) Getxattr(path string, name string) (int, []byte) {
+	inodeNum, _, err := e.inner.WalkInode(path)
+	if err != nil {
+		if errors.Is(err, vfs.ErrNotExist) {
+			return -fuse.ENOENT, nil
+		}
+		return -fuse.EIO, nil
+	}
+
+	val, err := e.inner.GetXAttr(inodeNum, name)
+	if err != nil {
+		if errors.Is(err, vfs.ErrAttrNotExist) {
+			return -fuse.ENOATTR, nil
+		}
+		return -fuse.EIO, nil
+	}
+
+	return 0, val
+}
+
+func (e *FileSystem) Setxattr(path string, name string, value []byte, flags int) int {
+	inodeNum, _, err := e.inner.WalkInode(path)
+	if err != nil {
+		if errors.Is(err, vfs.ErrNotExist) {
+			return -fuse.ENOENT
+		}
+		return -fuse.EIO
+	}
+
+	if flags != 0 {
+		exists := false
+		xattrs, err := e.inner.ListXAttrs(inodeNum)
+		if err == nil {
+			_, exists = xattrs[name]
+		}
+		if flags == 1 && exists {
+			return -fuse.EEXIST
+		}
+		if flags == 2 && !exists {
+			return -fuse.ENOATTR
+		}
+	}
+
+	err = e.inner.SetXAttr(inodeNum, name, value)
+	if err != nil {
+		if errors.Is(err, vfs.ErrNoSpace) {
+			return -fuse.ENOSPC
+		}
+		return -fuse.EIO
+	}
+
+	return 0
+}
+
+func (e *FileSystem) Listxattr(path string, fill func(name string) bool) int {
+	inodeNum, _, err := e.inner.WalkInode(path)
+	if err != nil {
+		if errors.Is(err, vfs.ErrNotExist) {
+			return -fuse.ENOENT
+		}
+		return -fuse.EIO
+	}
+
+	xattrs, err := e.inner.ListXAttrs(inodeNum)
+	if err != nil {
+		return -fuse.EIO
+	}
+
+	for k := range xattrs {
+		if !fill(k) {
+			break
+		}
+	}
+
+	return 0
+}
+
+func (e *FileSystem) Removexattr(path string, name string) int {
+	inodeNum, _, err := e.inner.WalkInode(path)
+	if err != nil {
+		if errors.Is(err, vfs.ErrNotExist) {
+			return -fuse.ENOENT
+		}
+		return -fuse.EIO
+	}
+
+	err = e.inner.RemoveXAttr(inodeNum, name)
+	if err != nil {
+		if errors.Is(err, vfs.ErrAttrNotExist) {
+			return -fuse.ENOATTR
+		}
+		return -fuse.EIO
+	}
+
+	return 0
+}
+
 func splitPath(path string) (parent, name string, err error) {
 	if path == "" || path == "/" {
 		return "", "", fmt.Errorf("cannot split root path")
