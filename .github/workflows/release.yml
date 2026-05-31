@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install WinFsp
+        run: |
+          choco install winfsp -y
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
+
+      - name: Run GoReleaser
+        run: |
+          goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack and Publish to Chocolatey
+        shell: pwsh
+        run: |
+          # 1. Locate the built executable in the dist directory and copy to chocolatey tools
+          $exePath = (Get-ChildItem -Path dist -Filter werunos.exe -Recurse | Select-Object -First 1).FullName
+          if (-not $exePath) {
+              throw "Could not find built werunos.exe in dist folder!"
+          }
+          Write-Output "Found werunos.exe at $exePath. Copying to chocolatey tools directory..."
+          Copy-Item -Path $exePath -Destination chocolatey/tools/
+
+          # 2. Extract version from tag (e.g. v1.8.5 -> 1.8.5)
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          Write-Output "Packing Chocolatey package for version $version"
+
+          # 3. Pack the NuGet package
+          choco pack chocolatey/werunos.nuspec --version $version --out chocolatey
+
+          # 4. Push to Chocolatey Community Repository
+          $nupkgPath = Get-ChildItem -Path chocolatey -Filter "*.nupkg" | Select-Object -First 1
+          if ($nupkgPath -and "${{ secrets.CHOCO_API_KEY }}") {
+              choco apikey --key ${{ secrets.CHOCO_API_KEY }} --source https://push.chocolatey.org/
+              choco push $nupkgPath.FullName --source https://push.chocolatey.org/
+          } else {
+              Write-Warning "Skipping Chocolatey push: CHOCO_API_KEY secret is not set or .nupkg was not created."
+          }
+
